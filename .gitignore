@@ -80,8 +80,9 @@ MOVIE/
 **/MOVIE/
 MUSIC/
 **/MUSIC/
-RES/
-**/RES/
+sonic-r-main/DATA/RES/
+sonic-r-main/RES/
+!app/src/main/res/**
 
 # Audio files (preserve bundled decomp sound effects in DATA/)
 *.mp3
@@ -94,5 +95,6 @@ RES/
 # ====================================================================
 # Ignore scratch screenshots and reports in root (keep assets in app/ & DATA/)
 /*.png
+!AppIcon.png
 recon-report.md
 *.log

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_launcher"
+    android:fitsSystemWindows="true"
+    android:gravity="center"
+    android:padding="32dp">
+
+    <LinearLayout
+        android:id="@+id/card_container"
+        android:layout_width="540dp"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:background="@drawable/card_placeholder"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingStart="40dp"
+        android:paddingTop="32dp"
+        android:paddingEnd="40dp"
+        android:paddingBottom="32dp">
+
+        <TextView
+            android:id="@+id/placeholder_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.08"
+            android:text="TITLE"
+            android:textColor="#FFCC00"
+            android:textSize="32sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/placeholder_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:text="COMING SOON"
+            android:textAllCaps="true"
+            android:textColor="#40C4FF"
+            android:textSize="14sp" />
+
+        <View
+            android:layout_width="80dp"
+            android:layout_height="2dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"
+            android:background="#2640C4FF" />
+
+        <TextView
+            android:id="@+id/placeholder_desc"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif"
+            android:gravity="center"
+            android:lineSpacingExtra="4dp"
+            android:text="Description goes here."
+            android:textColor="#B0BEC5"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/btn_back"
+            android:layout_width="240dp"
+            android:layout_height="48dp"
+            android:layout_marginTop="28dp"
+            android:background="@drawable/btn_secondary"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.06"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_back"
+            android:textColor="#E0F2FE"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+
+</RelativeLayout>

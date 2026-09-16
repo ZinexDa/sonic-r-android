@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_launcher"
+    android:fitsSystemWindows="true"
+    android:paddingLeft="48dp"
+    android:paddingTop="32dp"
+    android:paddingRight="48dp"
+    android:paddingBottom="24dp">
+
+    <!-- Brand / Title Section (Left Side) -->
+    <LinearLayout
+        android:id="@+id/brand_layout"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:layout_marginStart="32dp"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/title_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.08"
+            android:shadowColor="#80000000"
+            android:shadowDx="3"
+            android:shadowDy="5"
+            android:shadowRadius="12"
+            android:text="@string/app_name"
+            android:textColor="#FFCC00"
+            android:textSize="56sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/subtitle_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="-4dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.2"
+            android:text="@string/app_subtitle"
+            android:textAllCaps="true"
+            android:textColor="#80D8FF"
+            android:textSize="16sp" />
+
+        <View
+            android:layout_width="140dp"
+            android:layout_height="2.5dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="12dp"
+            android:background="#2979FF" />
+
+        <!-- Asset Status Indicator -->
+        <TextView
+            android:id="@+id/asset_status_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="16dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:text="@string/asset_status_ready"
+            android:textColor="#4ADE80"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+    <!-- Menu Buttons Section (Right Side) -->
+    <LinearLayout
+        android:id="@+id/menu_layout"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:layout_marginEnd="32dp"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/btn_play"
+            android:layout_width="280dp"
+            android:layout_height="56dp"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/btn_primary"
+            android:elevation="4dp"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.1"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_play"
+            android:textColor="#261200"
+            android:textSize="20sp" />
+
+        <Button
+            android:id="@+id/btn_settings"
+            android:layout_width="280dp"
+            android:layout_height="50dp"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/btn_secondary"
+            android:elevation="2dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.08"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_settings"
+            android:textColor="#E0F2FE"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/btn_multiplayer"
+            android:layout_width="280dp"
+            android:layout_height="50dp"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/btn_secondary"
+            android:elevation="2dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.08"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_multiplayer"
+            android:textColor="#E0F2FE"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/btn_mods"
+            android:layout_width="280dp"
+            android:layout_height="50dp"
+            android:layout_marginBottom="8dp"
+            android:background="@drawable/btn_secondary"
+            android:elevation="2dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.08"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_mods"
+            android:textColor="#E0F2FE"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/btn_reinstall"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="@android:color/transparent"
+            android:fontFamily="sans-serif"
+            android:letterSpacing="0.06"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_reinstall_assets"
+            android:textColor="#80D8FF"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- Installation Progress Overlay (Replaces menu during copy) -->
+    <LinearLayout
+        android:id="@+id/progress_card"
+        android:layout_width="480dp"
+        android:layout_height="wrap_content"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:layout_marginEnd="32dp"
+        android:background="@drawable/card_placeholder"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="28dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/progress_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.06"
+            android:text="@string/status_copying"
+            android:textColor="#FFCC00"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/progress_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="14dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@drawable/progress_bar_custom" />
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <TextView
+                android:id="@+id/progress_file"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentStart="true"
+                android:ellipsize="middle"
+                android:fontFamily="sans-serif"
+                android:singleLine="true"
+                android:text="Scanning..."
+                android:textColor="#B0BEC5"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/progress_percent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentEnd="true"
+                android:fontFamily="sans-serif-bold"
+                android:text="0%"
+                android:textColor="#FFCC00"
+                android:textSize="13sp" />
+
+        </RelativeLayout>
+
+    </LinearLayout>
+
+    <!-- Version & Build Info Footer -->
+    <TextView
+        android:id="@+id/footer_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:fontFamily="sans-serif"
+        android:text="@string/version_info"
+        android:textColor="#66FFFFFF"
+        android:textSize="12sp" />
+
+</RelativeLayout>

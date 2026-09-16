@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sonic R</string>
+    <string name="app_subtitle">Android Edition</string>
+    <string name="btn_play">PLAY</string>
+    <string name="btn_install_assets">INSTALL ASSETS</string>
+    <string name="btn_reinstall_assets">REINSTALL DATA</string>
+    <string name="btn_settings">SETTINGS</string>
+    <string name="btn_multiplayer">MULTIPLAYER</string>
+    <string name="btn_mods">MODS</string>
+    <string name="btn_back">BACK TO LAUNCHER</string>
+    <string name="title_settings">Settings</string>
+    <string name="title_multiplayer">Multiplayer</string>
+    <string name="title_mods">Mods</string>
+    <string name="title_about">About &amp; Credits</string>
+    <string name="btn_about">ABOUT &amp; CREDITS</string>
+    <string name="settings_audio_subtitle">Audio &amp; Volume</string>
+    <string name="settings_music_volume">Music Volume</string>
+    <string name="settings_sfx_volume">Sound Effects</string>
+    <string name="settings_controls_subtitle">Touch Controls</string>
+    <string name="btn_customize_controls">CUSTOMIZE CONTROLS</string>
+    <string name="btn_reset_controls">RESET CONTROLS TO DEFAULT</string>
+    <string name="title_customize_controls">CUSTOMIZE CONTROLS</string>
+    <string name="desc_customize_controls">Drag to move • Tap to select &amp; resize</string>
+    <string name="btn_save_exit">SAVE &amp; EXIT</string>
+    <string name="btn_reset_default">RESET</string>
+    <string name="label_selected_dpad">Selected: D-Pad</string>
+    <string name="label_selected_drift_l">Selected: Drift Left (L)</string>
+    <string name="label_selected_accel">Selected: Accelerate (A)</string>
+    <string name="label_selected_jump">Selected: Jump / Brake (B)</string>
+    <string name="label_selected_drift_r">Selected: Drift Right (R)</string>
+    <string name="label_selected_look">Selected: Look Back (Eye)</string>
+    <string name="label_selected_start">Selected: Start / Pause</string>
+    <string name="toast_controls_reset">Touch controls reset to default</string>
+    <string name="toast_controls_saved">Touch control layout saved</string>
+    <string name="desc_settings_coming_soon">Graphics, audio, and touch control layout options will be available here.</string>
+    <string name="desc_multiplayer_coming_soon">Cross-platform peer-to-peer multiplayer via signaling hub and Rust transport sidecar is in development.</string>
+    <string name="desc_mods_coming_soon">Coming Soon! Mod support and a dedicated mod manager are planned for a future update.</string>
+    <string name="version_info">v1.0 • Sonic R Decompilation</string>
+
+    <string name="asset_status_ready">● Game Data Ready</string>
+    <string name="asset_status_missing">▲ Game Data Missing — Tap to Install</string>
+    <string name="dialog_install_title">Install Sonic R Game Data</string>
+    <string name="dialog_install_desc">Sonic R requires retail PC game files to play.\n\nPlease select the folder containing your PC installation (which should include GENERAL, BIN, ISLAND, etc.). Files will be verified and prepared automatically.</string>
+    <string name="dialog_install_btn_pick">SELECT FOLDER</string>
+    <string name="dialog_cancel">CANCEL</string>
+    <string name="status_scanning">Scanning folder for game files…</string>
+    <string name="status_copying">Installing game files (%1$d / %2$d)…</string>
+    <string name="status_complete">Installation complete! Launching…</string>
+    <string name="status_failed">Installation Failed</string>
+    <string name="error_missing_files_title">Incomplete Game Folder</string>
+    <string name="error_missing_files_desc">The selected folder is missing required Sonic R components:\n\n%s\n\nPlease ensure you select the root Sonic R directory.</string>
+    <string name="error_copy_failed">Failed to install game files: %s</string>
+    <string name="btn_ok">OK</string>
+
+    <string name="about_subtitle">Sonic R Android Edition</string>
+    <string name="about_decomp_title">Decompilation Project</string>
+    <string name="about_decomp_desc">Reverse-engineering and C translation by jnmartin84 and contributors.</string>
+    <string name="about_android_title">Android Port &amp; GLES2 Backend</string>
+    <string name="about_android_desc">OpenGL ES 2.0 rendering pipeline, custom touch controls, audio balance, and native Android integration.</string>
+    <string name="about_legal_title">Legal &amp; Copyright</string>
+    <string name="about_legal_desc">Sonic R and its characters, trademarks, and game assets are © SEGA / Traveller\'s Tales (1997/1998). This is an unofficial, non-commercial fan preservation project and is not affiliated with or endorsed by SEGA. Users must supply their own retail PC game files to play.</string>
+    <string name="about_license_title">License Terms (jnmartin84)</string>
+    <string name="about_license_summary">• Free to download, build, and modify the code.\n• Strict No-Sale Clause: You may NOT sell this code in any form whatsoever — as source text, as a compiled executable for any platform, for profit or not for profit, as a \"bonus disc\" or any other packaging, with or without game data.\n• Sale is strictly prohibited under all circumstances.</string>
+    <string name="about_license_full_text">You can download this code,\nyou can build this code,\nyou can change this code,\nbut you have no rights to sell this code\nin any form whatsoever:\nas text,\nas an executable compiled for any platform,\nFor profit, not for profit, \"bonus disc\",\nnone of the above, doesn\'t matter,\nwith or without game data,\nsale is not permitted.</string>
+    <string name="btn_upstream_github">VIEW UPSTREAM GITHUB</string>
+</resources>

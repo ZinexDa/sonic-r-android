@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_launcher"
+    android:fitsSystemWindows="false">
+
+    <!-- Interactive Touch Controls Canvas (Full Screen) -->
+    <org.sonicr.android.TouchControlsEditView
+        android:id="@+id/touch_controls_edit_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Top Floating Header (Centered to leave top corners completely open) -->
+    <LinearLayout
+        android:id="@+id/top_bar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/card_placeholder"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="8dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/text_top_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-black"
+                android:letterSpacing="0.06"
+                android:text="@string/title_customize_controls"
+                android:textColor="#FFCC00"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/text_top_desc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.03"
+                android:text="@string/desc_customize_controls"
+                android:textColor="#90CAF9"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="1.5dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:background="#3340C4FF" />
+
+        <Button
+            android:id="@+id/btn_reset"
+            android:layout_width="96dp"
+            android:layout_height="34dp"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/btn_secondary"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.04"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_reset_default"
+            android:textColor="#90CAF9"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btn_save"
+            android:layout_width="128dp"
+            android:layout_height="34dp"
+            android:background="@drawable/btn_primary"
+            android:fontFamily="sans-serif-bold"
+            android:letterSpacing="0.04"
+            android:stateListAnimator="@null"
+            android:text="@string/btn_save_exit"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Bottom Floating Bar (Centered to leave bottom corners completely open) -->
+    <LinearLayout
+        android:id="@+id/bottom_bar"
+        android:layout_width="600dp"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/card_placeholder"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="6dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/text_selected_label"
+            android:layout_width="190dp"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.03"
+            android:text="@string/label_selected_dpad"
+            android:textColor="#E0F2FE"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btn_scale_minus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="@drawable/btn_secondary"
+            android:fontFamily="sans-serif-bold"
+            android:stateListAnimator="@null"
+            android:text="-"
+            android:textColor="#40C4FF"
+            android:textSize="15sp" />
+
+        <SeekBar
+            android:id="@+id/seek_scale"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:max="70"
+            android:progress="30"
+            android:progressTint="#FFCC00"
+            android:thumbTint="#FFCC00" />
+
+        <Button
+            android:id="@+id/btn_scale_plus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="@drawable/btn_secondary"
+            android:fontFamily="sans-serif-bold"
+            android:stateListAnimator="@null"
+            android:text="+"
+            android:textColor="#40C4FF"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/text_scale_percent"
+            android:layout_width="48dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="sans-serif-bold"
+            android:gravity="end"
+            android:text="100%"
+            android:textColor="#FFCC00"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+</RelativeLayout>

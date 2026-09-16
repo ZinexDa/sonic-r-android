@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_launcher"
+    android:fitsSystemWindows="true"
+    android:gravity="center"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:id="@+id/card_container"
+        android:layout_width="600dp"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:background="@drawable/card_placeholder"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingStart="32dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="32dp"
+        android:paddingBottom="16dp">
+
+        <TextView
+            android:id="@+id/about_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.08"
+            android:text="@string/title_about"
+            android:textColor="#FFCC00"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/about_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:text="@string/about_subtitle"
+            android:textAllCaps="true"
+            android:textColor="#40C4FF"
+            android:textSize="11sp" />
+
+        <View
+            android:layout_width="60dp"
+            android:layout_height="1.5dp"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="8dp"
+            android:background="#2640C4FF" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Decompilation Credits -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-bold"
+                    android:text="@string/about_decomp_title"
+                    android:textColor="#FFCC00"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="8dp"
+                    android:fontFamily="sans-serif"
+                    android:text="@string/about_decomp_desc"
+                    android:textColor="#B0BEC5"
+                    android:textSize="12sp" />
+
+                <!-- Android Port Credits -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-bold"
+                    android:text="@string/about_android_title"
+                    android:textColor="#FFCC00"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="8dp"
+                    android:fontFamily="sans-serif"
+                    android:text="@string/about_android_desc"
+                    android:textColor="#B0BEC5"
+                    android:textSize="12sp" />
+
+                <!-- Legal & Copyright -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-bold"
+                    android:text="@string/about_legal_title"
+                    android:textColor="#FFCC00"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="8dp"
+                    android:fontFamily="sans-serif"
+                    android:text="@string/about_legal_desc"
+                    android:textColor="#B0BEC5"
+                    android:textSize="12sp" />
+
+                <!-- License Terms Section -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-bold"
+                    android:text="@string/about_license_title"
+                    android:textColor="#4ADE80"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginBottom="6dp"
+                    android:fontFamily="sans-serif"
+                    android:text="@string/about_license_summary"
+                    android:textColor="#E0F2FE"
+                    android:textSize="12sp" />
+
+                <!-- Full License Monospace Box -->
+                <TextView
+                    android:id="@+id/license_full_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:layout_marginBottom="8dp"
+                    android:background="#20000000"
+                    android:fontFamily="monospace"
+                    android:padding="8dp"
+                    android:text="@string/about_license_full_text"
+                    android:textColor="#80D8FF"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- Buttons Row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_upstream_github"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/btn_secondary"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
+                android:stateListAnimator="@null"
+                android:text="@string/btn_upstream_github"
+                android:textColor="#40C4FF"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btn_back"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:background="@drawable/btn_secondary"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
+                android:stateListAnimator="@null"
+                android:text="@string/btn_back"
+                android:textColor="#E0F2FE"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</RelativeLayout>
