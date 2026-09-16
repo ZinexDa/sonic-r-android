@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+
+    <application
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:supportsRtl="true">
+
+        <!-- Native Launcher Screen (Entry Point) -->
+        <activity
+            android:name=".LauncherActivity"
+            android:label="@string/app_name"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- SDL2 Game Engine Host (Dedicated Process for Clean Lifecycle Restarts) -->
+        <activity
+            android:name=".GameActivity"
+            android:label="@string/app_name"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
+            android:exported="true"
+            android:process=":game"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
+        <!-- Settings Screen -->
+        <activity
+            android:name=".SettingsActivity"
+            android:label="@string/title_settings"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
+        <!-- Touch Controls Customization Screen -->
+        <activity
+            android:name=".CustomizeControlsActivity"
+            android:label="@string/title_customize_controls"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
+        <!-- Multiplayer Stub Screen -->
+        <activity
+            android:name=".MultiplayerActivity"
+            android:label="@string/title_multiplayer"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
+        <!-- Mods Stub Screen -->
+        <activity
+            android:name=".ModsActivity"
+            android:label="@string/title_mods"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
+        <!-- About & Credits Screen -->
+        <activity
+            android:name=".AboutActivity"
+            android:label="@string/title_about"
+            android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
+    </application>
+
+</manifest>

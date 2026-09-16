@@ -1,0 +1,98 @@
+# ====================================================================
+# Android & Gradle Build Artifacts
+# ====================================================================
+.gradle/
+build/
+**/build/
+**/.cxx/
+**/.kotlin/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+captures/
+.externalNativeBuild/
+
+# LOCAL MACHINE CONFIGURATION (Do NOT commit - contains personal SDK paths)
+local.properties
+
+# ====================================================================
+# Rust / Sidecar
+# ====================================================================
+target/
+**/target/
+**/*.rs.bk
+
+# ====================================================================
+# Native C / CMake Build Artifacts
+# ====================================================================
+*.o
+*.obj
+*.so
+*.a
+*.dylib
+*.dll
+*.exe
+*.elf
+*.cdi
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+source/sdl/build/
+source/sdl/build-release/
+source/sdl/build-wasm/
+source/dc/build/
+source/dc/1ST_READ.BIN
+source/dc/sonicr.bin
+windows/*.exe
+SONICR.INF
+update-repo.sh
+
+# ====================================================================
+# IDE / Editor Files
+# ====================================================================
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ====================================================================
+# COPYRIGHTED RETAIL GAME ASSETS (NEVER COMMIT)
+# ====================================================================
+# Discs, dumps, and container formats
+*.iso
+*.cue
+*.img
+*.mdf
+*.mds
+*.nrg
+*.cso
+
+# Retail directory structures if dropped locally
+ISLAND/
+**/ISLAND/
+MOVIE/
+**/MOVIE/
+MUSIC/
+**/MUSIC/
+RES/
+**/RES/
+
+# Audio files (preserve bundled decomp sound effects in DATA/)
+*.mp3
+*.ogg
+*.flac
+*.aac
+
+# ====================================================================
+# Local Development & Debug Scratch Files
+# ====================================================================
+# Ignore scratch screenshots and reports in root (keep assets in app/ & DATA/)
+/*.png
+recon-report.md
+*.log
