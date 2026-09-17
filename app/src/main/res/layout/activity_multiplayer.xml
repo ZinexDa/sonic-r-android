@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_launcher"
+    android:fitsSystemWindows="true"
+    android:gravity="center"
+    android:padding="24dp">
+
+    <LinearLayout
+        android:id="@+id/card_container"
+        android:layout_width="560dp"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:background="@drawable/card_placeholder"
+        android:orientation="vertical"
+        android:paddingStart="36dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="36dp"
+        android:paddingBottom="24dp">
+
+        <!-- Title Header -->
+        <TextView
+            android:id="@+id/tv_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.08"
+            android:text="ONLINE MULTIPLAYER"
+            android:textColor="#FFCC00"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.1"
+            android:text="P2P NETPLAY VIA SIGNALING HUB"
+            android:textColor="#80D8FF"
+            android:textSize="12sp" />
+
+        <!-- Role Toggle (Host vs Join) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_role_host"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/btn_primary"
+                android:fontFamily="sans-serif-black"
+                android:letterSpacing="0.05"
+                android:stateListAnimator="@null"
+                android:text="HOST ROOM"
+                android:textColor="#261200"
+                android:textSize="14sp" />
+
+            <View
+                android:layout_width="12dp"
+                android:layout_height="match_parent" />
+
+            <Button
+                android:id="@+id/btn_role_join"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/btn_secondary"
+                android:fontFamily="sans-serif-black"
+                android:letterSpacing="0.05"
+                android:stateListAnimator="@null"
+                android:text="JOIN ROOM"
+                android:textColor="#E0F2FE"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- Hub Address Input -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:text="SIGNALING HUB ADDRESS"
+            android:textColor="#90CAF9"
+            android:textSize="11sp" />
+
+        <EditText
+            android:id="@+id/et_hub_address"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_input_field"
+            android:fontFamily="sans-serif"
+            android:hint="127.0.0.1:8080 or ws://hub.example.com"
+            android:inputType="textUri"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#546E7A"
+            android:textSize="14sp" />
+
+        <!-- Host Mode: Room Name Input -->
+        <LinearLayout
+            android:id="@+id/layout_room_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
+                android:text="ROOM NAME"
+                android:textColor="#90CAF9"
+                android:textSize="11sp" />
+
+            <EditText
+                android:id="@+id/et_room_name"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/bg_input_field"
+                android:fontFamily="sans-serif"
+                android:hint="Sonic Room"
+                android:inputType="text"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#546E7A"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- Join Mode: Room ID Input -->
+        <LinearLayout
+            android:id="@+id/layout_room_id"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
+                android:text="ROOM ID / CODE (OPTIONAL)"
+                android:textColor="#90CAF9"
+                android:textSize="11sp" />
+
+            <EditText
+                android:id="@+id/et_room_id"
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/bg_input_field"
+                android:fontFamily="sans-serif"
+                android:hint="Leave empty for first available room"
+                android:inputType="text"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:textColor="#FFFFFF"
+                android:textColorHint="#546E7A"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- Status & Progress Feedback Area -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ProgressBar
+                android:id="@+id/progress_bar"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_marginEnd="8dp"
+                android:indeterminateTint="#FFCC00"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="sans-serif"
+                android:text="Ready to host or join session."
+                android:textColor="#B0BEC5"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Action Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_cancel"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/btn_secondary"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.05"
+                android:stateListAnimator="@null"
+                android:text="BACK"
+                android:textColor="#E0F2FE"
+                android:textSize="14sp" />
+
+            <View
+                android:layout_width="12dp"
+                android:layout_height="match_parent" />
+
+            <Button
+                android:id="@+id/btn_start_matchmaking"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1.6"
+                android:background="@drawable/btn_primary"
+                android:fontFamily="sans-serif-black"
+                android:letterSpacing="0.05"
+                android:stateListAnimator="@null"
+                android:text="HOST &amp; LAUNCH"
+                android:textColor="#261200"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</RelativeLayout>
