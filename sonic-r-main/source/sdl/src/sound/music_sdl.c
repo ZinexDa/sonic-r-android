@@ -9,6 +9,15 @@
 #include <SDL.h>
 #include <SDL_mixer.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#ifdef _WIN32
+#include <direct.h>
+#define sys_mkdir(p) _mkdir(p)
+#else
+#include <unistd.h>
+#define sys_mkdir(p) mkdir(p, 0755)
+#endif
 #include "sonicr_types.h"
 #include "sonicr_globals.h"
 #include "sonicr_functions.h"
@@ -100,11 +109,14 @@ void StopCD(void);
  * OpenCDDevice — replaces MCI cdaudio open.
  * Just marks the music system as ready.
  */
+void Music_TestTrackResolution(void);
+
 int OpenCDDevice(void)
 {
     DebugLog("OpenCDDevice (SDL_mixer mode)\n");
     s_musicReady = 1;
     g_mciDeviceId = 1;  /* non-zero = device ready */
+    Music_TestTrackResolution();
     return 1;
 }
 
@@ -123,80 +135,248 @@ void CloseCDDevice(void)
     g_mciDeviceId = 0;
 }
 
-/**
- * load_track — find and load the music file for a CD track number.
- *
- * Probes MUSIC/track<N>.<ext> in preference order, first existing file wins:
- *   .son  raw headerless PCM (44100/16/stereo) — streamed via a music_rwops shim
- *   .adx  CRI ADX ADPCM                         — decoded on demand via the shim
- *   .ogg/.mp3/.flac/.wav                        — handed straight to SDL_mixer
- * The .son/.adx shims stream through SDL_mixer's WAV backend, so no whole-track
- * decode is held in RAM. freesrc=1 hands ownership of the RWops to SDL_mixer.
- */
-static Mix_Music *load_track(int trackNum)
+/* =====================================================================
+ * Format Loaders & Candidate Path Resolution
+ * ===================================================================== */
+
+typedef Mix_Music *(*TrackLoaderFn)(const char *path);
+
+static Mix_Music *loader_son(const char *path)
 {
+    SDL_RWops *rw = MusicRW_OpenSon(path, 44100, 2, 16);
+    if (!rw) return NULL;
+    return Mix_LoadMUS_RW(rw, 1);
+}
+
+static Mix_Music *loader_adx(const char *path)
+{
+    SDL_RWops *rw = MusicRW_OpenAdx(path);
+    if (!rw) return NULL;
+    return Mix_LoadMUS_RW(rw, 1);
+}
+
+static Mix_Music *loader_adp(const char *path)
+{
+    SDL_RWops *rw = MusicRW_OpenAdp(path, 44100, 2);
+    if (!rw) return NULL;
+    return Mix_LoadMUS_RW(rw, 1);
+}
+
+static Mix_Music *loader_mixer(const char *path)
+{
+    FILE *tf = fopen(path, "rb");
+    if (!tf) return NULL;
+    fclose(tf);
+    Mix_Music *mm = Mix_LoadMUS(path);
+    if (!mm) {
+        SDL_Log("Mix_LoadMUS failed for '%s': %s", path, Mix_GetError());
+    }
+    return mm;
+}
+
+/**
+ * try_load_candidates — systematically probe combinations of:
+ *   - directory case (MUSIC, music, Music)
+ *   - prefix case (TRACK, Track, track)
+ *   - track number formatting (%d and %02d when trackNum < 10)
+ *   - extensions provided by caller
+ * Returns first successfully loaded Mix_Music*, or NULL if none found.
+ */
+static Mix_Music *try_load_candidates(int trackNum,
+                                      const char *const exts[], size_t numExts,
+                                      TrackLoaderFn loader,
+                                      char *outResolvedPath, size_t maxPathLen)
+{
+    static const char *const dirs[] = { "MUSIC", "music", "Music" };
+    static const char *const prefixes[] = { "TRACK", "Track", "track" };
+
+    char numStrs[2][16];
+    int numCount = 1;
+    snprintf(numStrs[0], sizeof(numStrs[0]), "%d", trackNum);
+    if (trackNum < 10) {
+        snprintf(numStrs[1], sizeof(numStrs[1]), "%02d", trackNum);
+        numCount = 2;
+    }
+
     char path[512];
-    SDL_RWops *rw;
-
-    static const char *const son_patterns[] = {
-        DATA_DIR "/MUSIC/TRACK%d.SON",
-        DATA_DIR "/MUSIC/track%d.son",
-        DATA_DIR "/MUSIC/Track%d.son",
-        DATA_DIR "/music/track%d.son",
-        DATA_DIR "/music/TRACK%d.SON"
-    };
-    for (size_t i = 0; i < sizeof(son_patterns) / sizeof(son_patterns[0]); i++) {
-        snprintf(path, sizeof(path), son_patterns[i], trackNum);
-        rw = MusicRW_OpenSon(path, 44100, 2, 16);
-        if (rw) {
-            return Mix_LoadMUS_RW(rw, 1);
-        }
-    }
-
-    static const char *const adx_patterns[] = {
-        DATA_DIR "/MUSIC/TRACK%d.ADX",
-        DATA_DIR "/MUSIC/track%d.adx",
-        DATA_DIR "/music/track%d.adx"
-    };
-    for (size_t i = 0; i < sizeof(adx_patterns) / sizeof(adx_patterns[0]); i++) {
-        snprintf(path, sizeof(path), adx_patterns[i], trackNum);
-        rw = MusicRW_OpenAdx(path);
-        if (rw) {
-            return Mix_LoadMUS_RW(rw, 1);
-        }
-    }
-
-    static const char *const adp_patterns[] = {
-        DATA_DIR "/MUSIC/TRACK%d.ADP",
-        DATA_DIR "/MUSIC/track%d.adp",
-        DATA_DIR "/music/track%d.adp"
-    };
-    for (size_t i = 0; i < sizeof(adp_patterns) / sizeof(adp_patterns[0]); i++) {
-        snprintf(path, sizeof(path), adp_patterns[i], trackNum);
-        rw = MusicRW_OpenAdp(path, 44100, 2);
-        if (rw) {
-            return Mix_LoadMUS_RW(rw, 1);
-        }
-    }
-
-    static const char *const exts[] = { "ogg", "mp3", "flac", "wav", "OGG", "MP3", "FLAC", "WAV" };
-    for (int i = 0; i < (int)(sizeof(exts) / sizeof(exts[0])); i++) {
-        snprintf(path, sizeof(path), DATA_DIR "/MUSIC/TRACK%d.%s", trackNum, exts[i]);
-        FILE *tf = fopen(path, "rb");
-        if (tf) {
-            fclose(tf);
-            Mix_Music *mm = Mix_LoadMUS(path);
-            if (mm) return mm;
-        }
-        snprintf(path, sizeof(path), DATA_DIR "/MUSIC/track%d.%s", trackNum, exts[i]);
-        tf = fopen(path, "rb");
-        if (tf) {
-            fclose(tf);
-            Mix_Music *mm = Mix_LoadMUS(path);
-            if (mm) return mm;
+    for (size_t e = 0; e < numExts; e++) {
+        for (size_t d = 0; d < sizeof(dirs) / sizeof(dirs[0]); d++) {
+            for (size_t p = 0; p < sizeof(prefixes) / sizeof(prefixes[0]); p++) {
+                for (int n = 0; n < numCount; n++) {
+                    snprintf(path, sizeof(path), DATA_DIR "/%s/%s%s.%s",
+                             dirs[d], prefixes[p], numStrs[n], exts[e]);
+                    Mix_Music *mm = loader(path);
+                    if (mm) {
+                        if (outResolvedPath && maxPathLen > 0) {
+                            snprintf(outResolvedPath, maxPathLen, "%s", path);
+                        }
+                        return mm;
+                    }
+                }
+            }
         }
     }
     return NULL;
+}
+
+/**
+ * load_track — find and load the music file for a CD track number.
+ *
+ * Probes candidate paths in preference order, first existing loadable file wins:
+ *   1. .son  raw headerless PCM (44100/16/stereo) — streamed via music_rwops shim
+ *   2. .adx  CRI ADX ADPCM                         — decoded on demand via shim
+ *   3. .adp  AICA ADPCM                            — decoded on demand via shim
+ *   4. .ogg/.mp3/.flac/.wav                        — handed straight to SDL_mixer
+ */
+static Mix_Music *load_track(int trackNum)
+{
+    char resolvedPath[512] = {0};
+
+    static const char *const son_exts[] = { "SON", "son" };
+    static const char *const adx_exts[] = { "ADX", "adx" };
+    static const char *const adp_exts[] = { "ADP", "adp" };
+    static const char *const mixer_exts[] = {
+        "ogg", "OGG",
+        "mp3", "MP3",
+        "flac", "FLAC",
+        "wav", "WAV"
+    };
+
+    Mix_Music *mm = NULL;
+
+    /* 1. Raw headerless PCM (.son) */
+    mm = try_load_candidates(trackNum, son_exts, sizeof(son_exts) / sizeof(son_exts[0]),
+                             loader_son, resolvedPath, sizeof(resolvedPath));
+    if (mm) {
+        SDL_Log("load_track(%d) loaded .son: '%s'", trackNum, resolvedPath);
+        return mm;
+    }
+
+    /* 2. CRI ADX ADPCM (.adx) */
+    mm = try_load_candidates(trackNum, adx_exts, sizeof(adx_exts) / sizeof(adx_exts[0]),
+                             loader_adx, resolvedPath, sizeof(resolvedPath));
+    if (mm) {
+        SDL_Log("load_track(%d) loaded .adx: '%s'", trackNum, resolvedPath);
+        return mm;
+    }
+
+    /* 3. AICA ADPCM (.adp) */
+    mm = try_load_candidates(trackNum, adp_exts, sizeof(adp_exts) / sizeof(adp_exts[0]),
+                             loader_adp, resolvedPath, sizeof(resolvedPath));
+    if (mm) {
+        SDL_Log("load_track(%d) loaded .adp: '%s'", trackNum, resolvedPath);
+        return mm;
+    }
+
+    /* 4. Native SDL_mixer formats (.ogg, .mp3, .flac, .wav) */
+    mm = try_load_candidates(trackNum, mixer_exts, sizeof(mixer_exts) / sizeof(mixer_exts[0]),
+                             loader_mixer, resolvedPath, sizeof(resolvedPath));
+    if (mm) {
+        SDL_Log("load_track(%d) loaded audio: '%s'", trackNum, resolvedPath);
+        return mm;
+    }
+
+    return NULL;
+}
+
+/* =====================================================================
+ * Music Track Resolution Unit Testing
+ * ===================================================================== */
+
+static Mix_Music *test_file_probe_loader(const char *path)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return NULL;
+    fclose(fp);
+    return (Mix_Music *)(uintptr_t)1;
+}
+
+static void test_create_file(const char *path, int *created)
+{
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        fclose(f);
+        *created = 0;
+        return;
+    }
+    f = fopen(path, "wb");
+    if (f) {
+        fputc(0, f);
+        fclose(f);
+        *created = 1;
+    } else {
+        *created = 0;
+    }
+}
+
+void Music_TestTrackResolution(void)
+{
+    static int s_testRan = 0;
+    if (s_testRan) return;
+    s_testRan = 1;
+
+    SDL_Log("MusicTrackResolution: Running automated track resolution verification...");
+
+    /* Ensure test directories exist */
+    sys_mkdir(DATA_DIR "/music");
+    sys_mkdir(DATA_DIR "/MUSIC");
+
+    struct TestCase {
+        int trackNum;
+        const char *createdPath;
+        const char *const *exts;
+        size_t numExts;
+        const char *desc;
+    };
+
+    static const char *const ogg_exts[] = { "ogg", "OGG" };
+    static const char *const mp3_exts[] = { "mp3", "MP3" };
+    static const char *const wav_exts[] = { "wav", "WAV" };
+    static const char *const flac_exts[] = { "flac", "FLAC" };
+    static const char *const son_exts[] = { "SON", "son" };
+    static const char *const adx_exts[] = { "ADX", "adx" };
+    static const char *const adp_exts[] = { "ADP", "adp" };
+
+    struct TestCase tests[] = {
+        { 2, DATA_DIR "/music/track02.ogg", ogg_exts, 2, "zero-padded lowercase in music/" },
+        { 3, DATA_DIR "/MUSIC/Track03.mp3", mp3_exts, 2, "zero-padded TitleCase in MUSIC/" },
+        { 4, DATA_DIR "/music/TRACK4.wav",  wav_exts, 2, "non-padded uppercase prefix in music/" },
+        { 5, DATA_DIR "/MUSIC/Track5.flac", flac_exts, 2, "non-padded TitleCase prefix in MUSIC/" },
+        { 1, DATA_DIR "/music/Track01.son", son_exts, 2, "zero-padded TitleCase .son in music/" },
+        { 7, DATA_DIR "/MUSIC/track07.adx", adx_exts, 2, "zero-padded lowercase .adx in MUSIC/" },
+        { 8, DATA_DIR "/music/TRACK08.adp", adp_exts, 2, "zero-padded uppercase .adp in music/" }
+    };
+
+    int allPassed = 1;
+    int numTests = (int)(sizeof(tests) / sizeof(tests[0]));
+
+    for (int i = 0; i < numTests; i++) {
+        int created = 0;
+        test_create_file(tests[i].createdPath, &created);
+
+        char resolved[512] = {0};
+        Mix_Music *res = try_load_candidates(tests[i].trackNum, tests[i].exts, tests[i].numExts,
+                                             test_file_probe_loader, resolved, sizeof(resolved));
+
+        if (res && strcmp(resolved, tests[i].createdPath) == 0) {
+            SDL_Log("MusicTrackResolution: [PASS] Case %d (%s) -> '%s'",
+                    i + 1, tests[i].desc, resolved);
+        } else {
+            SDL_Log("MusicTrackResolution: [FAIL] Case %d (%s): expected '%s', got '%s'",
+                    i + 1, tests[i].desc, tests[i].createdPath, resolved);
+            allPassed = 0;
+        }
+
+        if (created) {
+            remove(tests[i].createdPath);
+        }
+    }
+
+    if (allPassed) {
+        SDL_Log("MusicTrackResolution: [PASS] All 7 track naming variants (zero-padded, directory case, prefix case) resolved successfully!");
+    } else {
+        SDL_Log("MusicTrackResolution: [FAIL] One or more track naming variants failed resolution!");
+    }
 }
 
 /**
