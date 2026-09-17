@@ -36,7 +36,7 @@
     <string name="desc_settings_coming_soon">Graphics, audio, and touch control layout options will be available here.</string>
     <string name="desc_multiplayer_coming_soon">Cross-platform peer-to-peer multiplayer via signaling hub and Rust transport sidecar is in development.</string>
     <string name="desc_mods_coming_soon">Coming Soon! Mod support and a dedicated mod manager are planned for a future update.</string>
-    <string name="version_info">v1.1 • Sonic R Decompilation</string>
+    <string name="version_info">v1.1.1 • Sonic R Decompilation</string>
 
     <string name="asset_status_ready">● Game Data Ready</string>
     <string name="asset_status_missing">▲ Game Data Missing — Tap to Install</string>
