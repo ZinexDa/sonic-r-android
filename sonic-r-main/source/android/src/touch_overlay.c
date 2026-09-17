@@ -32,16 +32,35 @@ extern unsigned char s_physicalKeystate[256];
 
 #define MAX_TOUCHES 10
 
+typedef enum {
+    TOUCH_BIND_NONE = 0,
+    TOUCH_BIND_JOYSTICK,
+    TOUCH_BIND_ACCEL,
+    TOUCH_BIND_JUMP,
+    TOUCH_BIND_DRIFT_L,
+    TOUCH_BIND_DRIFT_R,
+    TOUCH_BIND_LOOK,
+    TOUCH_BIND_START
+} TouchBinding;
+
 typedef struct {
     SDL_FingerID id;
     float x; /* normalized [0.0, 1.0] */
     float y; /* normalized [0.0, 1.0] */
     int active;
     int pendingRelease;
+    TouchBinding binding;
 } ActiveTouch;
 
 static ActiveTouch s_touches[MAX_TOUCHES];
 static unsigned char s_touchKeystate[256];
+
+/* Virtual Joystick state */
+static int s_joystickActive = 0;
+static float s_joystickKnobX = 0.0f;
+static float s_joystickKnobY = 0.0f;
+static float s_joystickAngle = 0.0f;
+static float s_joystickMagnitude = 0.0f;
 
 /* Current button pressed state for visual rendering */
 typedef struct {
@@ -323,42 +342,51 @@ static int HitTestPill(float px, float py, float cx, float cy, float halfW, floa
             py >= (cy - halfH - pad) && py <= (cy + halfH + pad));
 }
 
-static void HitTestDpad(float px, float py, float cx, float cy, float r, float deadzone,
-                        int *outUp, int *outDown, int *outLeft, int *outRight)
+static TouchBinding DetermineTouchBinding(float px, float py, const TouchLayout *layout)
 {
-    float dx = px - cx;
-    float dy = py - cy;
-    float distSq = dx * dx + dy * dy;
-    float rHit = r * 1.35f;
-
-    if (distSq < (deadzone * deadzone) || distSq > (rHit * rHit)) {
-        return;
+    /* 1. Check Start pill button */
+    if (HitTestPill(px, py, layout->start_cx, layout->start_cy, layout->start_w * 0.5f, layout->start_h * 0.5f)) {
+        return TOUCH_BIND_START;
     }
 
-    float angle = atan2f(dy, dx);
-    float deg = angle * (180.0f / (float)M_PI); /* -180 to +180 */
-
-    if (deg >= -22.5f && deg <= 22.5f) {
-        *outRight = 1;
-    } else if (deg > 22.5f && deg < 67.5f) {
-        *outDown = 1;
-        *outRight = 1;
-    } else if (deg >= 67.5f && deg <= 112.5f) {
-        *outDown = 1;
-    } else if (deg > 112.5f && deg < 157.5f) {
-        *outDown = 1;
-        *outLeft = 1;
-    } else if (deg >= 157.5f || deg <= -157.5f) {
-        *outLeft = 1;
-    } else if (deg > -157.5f && deg < -112.5f) {
-        *outUp = 1;
-        *outLeft = 1;
-    } else if (deg >= -112.5f && deg <= -67.5f) {
-        *outUp = 1;
-    } else if (deg > -67.5f && deg < -22.5f) {
-        *outUp = 1;
-        *outRight = 1;
+    /* 2. Check Virtual Joystick base circle */
+    float jdx = px - layout->dpad_cx;
+    float jdy = py - layout->dpad_cy;
+    float jHit = layout->dpad_radius * 1.35f;
+    if ((jdx * jdx + jdy * jdy) <= (jHit * jHit)) {
+        return TOUCH_BIND_JOYSTICK;
     }
+
+    /* 3. Check circle action buttons. If overlapping generous paddings, pick the closest center. */
+    TouchBinding bestBind = TOUCH_BIND_NONE;
+    float bestNormDistSq = 999999.0f;
+
+    struct {
+        TouchBinding bind;
+        float cx, cy, r;
+    } buttons[] = {
+        { TOUCH_BIND_ACCEL,   layout->accel_cx,   layout->accel_cy,   layout->accel_radius },
+        { TOUCH_BIND_JUMP,    layout->jump_cx,    layout->jump_cy,    layout->jump_radius },
+        { TOUCH_BIND_DRIFT_L, layout->driftL_cx,  layout->driftL_cy,  layout->driftL_radius },
+        { TOUCH_BIND_DRIFT_R, layout->driftR_cx,  layout->driftR_cy,  layout->driftR_radius },
+        { TOUCH_BIND_LOOK,    layout->look_cx,    layout->look_cy,    layout->look_radius }
+    };
+
+    for (int i = 0; i < 5; i++) {
+        float dx = px - buttons[i].cx;
+        float dy = py - buttons[i].cy;
+        float distSq = dx * dx + dy * dy;
+        float rHit = buttons[i].r * 1.30f;
+        if (distSq <= (rHit * rHit)) {
+            float normDistSq = distSq / (buttons[i].r * buttons[i].r);
+            if (normDistSq < bestNormDistSq) {
+                bestNormDistSq = normDistSq;
+                bestBind = buttons[i].bind;
+            }
+        }
+    }
+
+    return bestBind;
 }
 
 /* =====================================================================
@@ -370,6 +398,11 @@ void TouchOverlay_Init(void)
     memset(s_touches, 0, sizeof(s_touches));
     memset(s_touchKeystate, 0, sizeof(s_touchKeystate));
     memset(&s_pressed, 0, sizeof(s_pressed));
+    s_joystickActive = 0;
+    s_joystickKnobX = 0.0f;
+    s_joystickKnobY = 0.0f;
+    s_joystickAngle = 0.0f;
+    s_joystickMagnitude = 0.0f;
 }
 
 void TouchOverlay_Reset(void)
@@ -377,6 +410,11 @@ void TouchOverlay_Reset(void)
     memset(s_touches, 0, sizeof(s_touches));
     memset(s_touchKeystate, 0, sizeof(s_touchKeystate));
     memset(&s_pressed, 0, sizeof(s_pressed));
+    s_joystickActive = 0;
+    s_joystickKnobX = 0.0f;
+    s_joystickKnobY = 0.0f;
+    s_joystickAngle = 0.0f;
+    s_joystickMagnitude = 0.0f;
 }
 
 void TouchOverlay_TestMultiTouch(void)
@@ -390,9 +428,9 @@ void TouchOverlay_TestMultiTouch(void)
     TouchLayout layout;
     ComputeLayout(screenW, screenH, &layout);
 
-    SDL_Log("TouchOverlay: Running Multi-Touch Unit Verification (%dx%d)...", screenW, screenH);
+    SDL_Log("TouchOverlay: Running Multi-Touch & Virtual Joystick Unit Verification (%dx%d)...", screenW, screenH);
 
-    /* 1. Finger 1 on D-pad Right */
+    /* 1. Finger 1 on D-pad / Joystick (Right) */
     SDL_Event e1;
     memset(&e1, 0, sizeof(e1));
     e1.type = SDL_FINGERDOWN;
@@ -401,7 +439,7 @@ void TouchOverlay_TestMultiTouch(void)
     e1.tfinger.y = layout.dpad_cy / (float)screenH;
     TouchOverlay_HandleEvent(&e1);
 
-    /* 2. Finger 2 on Accel A */
+    /* 2. Finger 2 on Accel (Button A) */
     SDL_Event e2;
     memset(&e2, 0, sizeof(e2));
     e2.type = SDL_FINGERDOWN;
@@ -410,7 +448,7 @@ void TouchOverlay_TestMultiTouch(void)
     e2.tfinger.y = layout.accel_cy / (float)screenH;
     TouchOverlay_HandleEvent(&e2);
 
-    /* 3. Finger 3 on Jump B */
+    /* 3. Finger 3 on Jump (Button B) */
     SDL_Event e3;
     memset(&e3, 0, sizeof(e3));
     e3.type = SDL_FINGERDOWN;
@@ -458,6 +496,42 @@ void TouchOverlay_TestMultiTouch(void)
                 passReleaseA, passStillRight, passStillB);
     }
 
+    /* 4. Test Unbounded Virtual Joystick: drag Finger 1 far outside base (3.0x radius to the right) */
+    SDL_Event eMove1;
+    memset(&eMove1, 0, sizeof(eMove1));
+    eMove1.type = SDL_FINGERMOTION;
+    eMove1.tfinger.fingerId = 101;
+    eMove1.tfinger.x = (layout.dpad_cx + layout.dpad_radius * 3.0f) / (float)screenW;
+    eMove1.tfinger.y = layout.dpad_cy / (float)screenH;
+    TouchOverlay_HandleEvent(&eMove1);
+
+    TouchOverlay_Update(testKeystate);
+    int passUnboundedRight = (testKeystate[0xCD] == 0x80);
+    if (passUnboundedRight) {
+        SDL_Log("TouchOverlay: [PASS] Unbounded Joystick: steering held active at 3.0x radius outside circle!");
+    } else {
+        SDL_Log("TouchOverlay: [FAIL] Unbounded Joystick: steering dropped when finger moved outside bounds!");
+    }
+
+    /* 5. Test Anti-Bleed: drag finger 3 (started on Button B) over to Button A coordinates */
+    SDL_Event eMove3;
+    memset(&eMove3, 0, sizeof(eMove3));
+    eMove3.type = SDL_FINGERMOTION;
+    eMove3.tfinger.fingerId = 103;
+    eMove3.tfinger.x = layout.accel_cx / (float)screenW;
+    eMove3.tfinger.y = layout.accel_cy / (float)screenH;
+    TouchOverlay_HandleEvent(&eMove3);
+
+    TouchOverlay_Update(testKeystate);
+    int passAntiBleedNoA = (testKeystate[0x39] == 0x00); /* Button A must NOT activate */
+    int passAntiBleedStillB = (testKeystate[0x1E] == 0x80); /* Button B must STAY active */
+    if (passAntiBleedNoA && passAntiBleedStillB) {
+        SDL_Log("TouchOverlay: [PASS] Anti-Bleed: dragging from Button B into Button A did not bleed into Button A!");
+    } else {
+        SDL_Log("TouchOverlay: [FAIL] Anti-Bleed failed: ButtonA=%d (expected 0), ButtonB=%d (expected 1)",
+                testKeystate[0x39], testKeystate[0x1E]);
+    }
+
     /* Reset all touches back to clean state */
     TouchOverlay_Reset();
     TouchOverlay_Update(testKeystate);
@@ -475,8 +549,7 @@ void TouchOverlay_TestMultiTouch(void)
 void TouchOverlay_HandleEvent(const SDL_Event *event)
 {
     switch (event->type) {
-        case SDL_FINGERDOWN:
-        case SDL_FINGERMOTION: {
+        case SDL_FINGERDOWN: {
             SDL_FingerID fid = event->tfinger.fingerId;
             int slot = -1;
             for (int i = 0; i < MAX_TOUCHES - 1; i++) {
@@ -499,6 +572,31 @@ void TouchOverlay_HandleEvent(const SDL_Event *event)
                 s_touches[slot].y = event->tfinger.y;
                 s_touches[slot].active = 1;
                 s_touches[slot].pendingRelease = 0;
+
+                int screenW = 0, screenH = 0;
+                platform_get_drawable_size(&screenW, &screenH);
+                if (screenW > 0 && screenH > 0) {
+                    TouchLayout layout;
+                    ComputeLayout(screenW, screenH, &layout);
+                    float px = event->tfinger.x * (float)screenW;
+                    float py = event->tfinger.y * (float)screenH;
+                    s_touches[slot].binding = DetermineTouchBinding(px, py, &layout);
+                } else {
+                    s_touches[slot].binding = TOUCH_BIND_NONE;
+                }
+            }
+            break;
+        }
+
+        case SDL_FINGERMOTION: {
+            SDL_FingerID fid = event->tfinger.fingerId;
+            for (int i = 0; i < MAX_TOUCHES - 1; i++) {
+                if (s_touches[i].active && s_touches[i].id == fid) {
+                    s_touches[i].x = event->tfinger.x;
+                    s_touches[i].y = event->tfinger.y;
+                    /* Binding is locked to the initial control - never change on drag */
+                    break;
+                }
             }
             break;
         }
@@ -525,6 +623,12 @@ void TouchOverlay_HandleEvent(const SDL_Event *event)
                 s_touches[slot].y = (float)event->button.y / (float)h;
                 s_touches[slot].active = 1;
                 s_touches[slot].pendingRelease = 0;
+
+                TouchLayout layout;
+                ComputeLayout(w, h, &layout);
+                float px = (float)event->button.x;
+                float py = (float)event->button.y;
+                s_touches[slot].binding = DetermineTouchBinding(px, py, &layout);
             }
             break;
         }
@@ -568,41 +672,108 @@ void TouchOverlay_Update(unsigned char *keystate)
 
     TouchButtonState prev = s_pressed;
     memset(&s_pressed, 0, sizeof(s_pressed));
+    s_joystickActive = 0;
 
-    /* Re-evaluate all active/pending touches against current layout */
+    /* Process all active/pending touches strictly by their bound control */
     for (int i = 0; i < MAX_TOUCHES; i++) {
         if (!s_touches[i].active && !s_touches[i].pendingRelease) continue;
 
         float px = s_touches[i].x * (float)screenW;
         float py = s_touches[i].y * (float)screenH;
 
-        HitTestDpad(px, py, layout.dpad_cx, layout.dpad_cy, layout.dpad_radius, layout.dpad_deadzone,
-                    &s_pressed.up, &s_pressed.down, &s_pressed.left, &s_pressed.right);
+        switch (s_touches[i].binding) {
+            case TOUCH_BIND_JOYSTICK: {
+                s_joystickActive = 1;
+                float dx = px - layout.dpad_cx;
+                float dy = py - layout.dpad_cy;
+                float dist = sqrtf(dx * dx + dy * dy);
 
-        if (HitTestCircle(px, py, layout.accel_cx, layout.accel_cy, layout.accel_radius)) {
-            s_pressed.accel = 1;
-        }
-        if (HitTestCircle(px, py, layout.jump_cx, layout.jump_cy, layout.jump_radius)) {
-            s_pressed.jump = 1;
-        }
-        if (HitTestCircle(px, py, layout.driftL_cx, layout.driftL_cy, layout.driftL_radius)) {
-            s_pressed.driftL = 1;
-        }
-        if (HitTestCircle(px, py, layout.driftR_cx, layout.driftR_cy, layout.driftR_radius)) {
-            s_pressed.driftR = 1;
-        }
-        if (HitTestCircle(px, py, layout.look_cx, layout.look_cy, layout.look_radius)) {
-            s_pressed.look = 1;
-        }
-        if (HitTestPill(px, py, layout.start_cx, layout.start_cy, layout.start_w * 0.5f, layout.start_h * 0.5f)) {
-            s_pressed.start = 1;
+                /* Direction calculation - UNBOUNDED once started */
+                if (dist > layout.dpad_deadzone) {
+                    float angle = atan2f(dy, dx);
+                    float deg = angle * (180.0f / (float)M_PI); /* -180 to +180 */
+
+                    if (deg >= -22.5f && deg <= 22.5f) {
+                        s_pressed.right = 1;
+                    } else if (deg > 22.5f && deg < 67.5f) {
+                        s_pressed.down = 1;
+                        s_pressed.right = 1;
+                    } else if (deg >= 67.5f && deg <= 112.5f) {
+                        s_pressed.down = 1;
+                    } else if (deg > 112.5f && deg < 157.5f) {
+                        s_pressed.down = 1;
+                        s_pressed.left = 1;
+                    } else if (deg >= 157.5f || deg <= -157.5f) {
+                        s_pressed.left = 1;
+                    } else if (deg > -157.5f && deg < -112.5f) {
+                        s_pressed.up = 1;
+                        s_pressed.left = 1;
+                    } else if (deg >= -112.5f && deg <= -67.5f) {
+                        s_pressed.up = 1;
+                    } else if (deg > -67.5f && deg < -22.5f) {
+                        s_pressed.up = 1;
+                        s_pressed.right = 1;
+                    }
+                    s_joystickAngle = angle;
+                }
+
+                /* Visual knob position clamped to base travel radius */
+                float maxTravel = layout.dpad_radius * 0.62f;
+                if (dist > maxTravel) {
+                    float scale = maxTravel / (dist > 0.0001f ? dist : 0.0001f);
+                    s_joystickKnobX = layout.dpad_cx + dx * scale;
+                    s_joystickKnobY = layout.dpad_cy + dy * scale;
+                    s_joystickMagnitude = 1.0f;
+                } else {
+                    s_joystickKnobX = layout.dpad_cx + dx;
+                    s_joystickKnobY = layout.dpad_cy + dy;
+                    s_joystickMagnitude = dist / maxTravel;
+                }
+                break;
+            }
+
+            case TOUCH_BIND_ACCEL:
+                s_pressed.accel = 1;
+                break;
+
+            case TOUCH_BIND_JUMP:
+                s_pressed.jump = 1;
+                break;
+
+            case TOUCH_BIND_DRIFT_L:
+                s_pressed.driftL = 1;
+                break;
+
+            case TOUCH_BIND_DRIFT_R:
+                s_pressed.driftR = 1;
+                break;
+
+            case TOUCH_BIND_LOOK:
+                s_pressed.look = 1;
+                break;
+
+            case TOUCH_BIND_START:
+                s_pressed.start = 1;
+                break;
+
+            case TOUCH_BIND_NONE:
+            default:
+                break;
         }
 
         /* Retire touches that were released */
         if (s_touches[i].pendingRelease) {
             s_touches[i].active = 0;
             s_touches[i].pendingRelease = 0;
+            s_touches[i].binding = TOUCH_BIND_NONE;
         }
+    }
+
+    /* Reset knob to center if joystick is not touched */
+    if (!s_joystickActive) {
+        s_joystickKnobX = layout.dpad_cx;
+        s_joystickKnobY = layout.dpad_cy;
+        s_joystickMagnitude = 0.0f;
     }
 
     /* Log changes for debugging */
@@ -1117,82 +1288,81 @@ void TouchOverlay_Render(int screenWidth, int screenHeight)
     s_numVertices = 0;
 
     /* -------------------------------------------------------------
-     * 1. Render D-Pad
+     * 1. Render Virtual Joystick
      * ------------------------------------------------------------- */
     float dpad_r = layout.dpad_radius;
     float dpad_cx = layout.dpad_cx;
     float dpad_cy = layout.dpad_cy;
 
     /* Base background circle */
-    AddCircle(dpad_cx, dpad_cy, dpad_r, 32, 0.06f, 0.08f, 0.14f, 0.45f);
-    AddRing(dpad_cx, dpad_cy, dpad_r - 3.0f, dpad_r, 32, 0.5f, 0.7f, 0.9f, 0.40f);
+    AddCircle(dpad_cx, dpad_cy, dpad_r, 36, 0.06f, 0.08f, 0.14f, 0.45f);
+    /* Outer perimeter ring */
+    AddRing(dpad_cx, dpad_cy, dpad_r - 3.0f, dpad_r, 36, 0.45f, 0.65f, 0.88f, 0.40f);
+    /* Deadzone guide ring */
+    AddRing(dpad_cx, dpad_cy, layout.dpad_deadzone - 1.5f, layout.dpad_deadzone + 1.5f, 24, 0.35f, 0.50f, 0.70f, 0.25f);
 
     /* Direction active wedges */
     float wedgeInner = layout.dpad_deadzone * 1.1f;
     float wedgeOuter = dpad_r - 4.0f;
     if (s_pressed.up) {
         AddWedge(dpad_cx, dpad_cy, wedgeInner, wedgeOuter, -112.5f * (float)M_PI / 180.0f, -67.5f * (float)M_PI / 180.0f, 8,
-                 0.15f, 0.75f, 1.0f, 0.55f);
+                 0.18f, 0.75f, 1.0f, 0.45f);
     }
     if (s_pressed.down) {
         AddWedge(dpad_cx, dpad_cy, wedgeInner, wedgeOuter, 67.5f * (float)M_PI / 180.0f, 112.5f * (float)M_PI / 180.0f, 8,
-                 0.15f, 0.75f, 1.0f, 0.55f);
+                 0.18f, 0.75f, 1.0f, 0.45f);
     }
     if (s_pressed.left) {
         AddWedge(dpad_cx, dpad_cy, wedgeInner, wedgeOuter, 157.5f * (float)M_PI / 180.0f, 202.5f * (float)M_PI / 180.0f, 8,
-                 0.15f, 0.75f, 1.0f, 0.55f);
+                 0.18f, 0.75f, 1.0f, 0.45f);
     }
     if (s_pressed.right) {
         AddWedge(dpad_cx, dpad_cy, wedgeInner, wedgeOuter, -22.5f * (float)M_PI / 180.0f, 22.5f * (float)M_PI / 180.0f, 8,
-                 0.15f, 0.75f, 1.0f, 0.55f);
+                 0.18f, 0.75f, 1.0f, 0.45f);
     }
 
-    /* Direction arrows */
-    float arrowDist = dpad_r * 0.60f;
-    float arrowS = dpad_r * 0.18f;
+    /* Direction tick marks */
+    float tickInner = dpad_r * 0.76f;
+    float tickOuter = dpad_r * 0.90f;
+    float tickThick = 2.0f;
+    /* Up */
+    AddLine(dpad_cx, dpad_cy - tickInner, dpad_cx, dpad_cy - tickOuter, tickThick,
+            s_pressed.up ? 0.3f : 0.8f, s_pressed.up ? 0.95f : 0.85f, 1.0f, s_pressed.up ? 0.9f : 0.4f);
+    /* Down */
+    AddLine(dpad_cx, dpad_cy + tickInner, dpad_cx, dpad_cy + tickOuter, tickThick,
+            s_pressed.down ? 0.3f : 0.8f, s_pressed.down ? 0.95f : 0.85f, 1.0f, s_pressed.down ? 0.9f : 0.4f);
+    /* Left */
+    AddLine(dpad_cx - tickInner, dpad_cy, dpad_cx - tickOuter, dpad_cy, tickThick,
+            s_pressed.left ? 0.3f : 0.8f, s_pressed.left ? 0.95f : 0.85f, 1.0f, s_pressed.left ? 0.9f : 0.4f);
+    /* Right */
+    AddLine(dpad_cx + tickInner, dpad_cy, dpad_cx + tickOuter, dpad_cy, tickThick,
+            s_pressed.right ? 0.3f : 0.8f, s_pressed.right ? 0.95f : 0.85f, 1.0f, s_pressed.right ? 0.9f : 0.4f);
 
-    /* Up Arrow */
-    float upR = s_pressed.up ? 0.2f : 0.85f;
-    float upG = s_pressed.up ? 0.9f : 0.90f;
-    float upB = s_pressed.up ? 1.0f : 0.95f;
-    float upA = s_pressed.up ? 0.95f : 0.65f;
-    AddTriangle(dpad_cx, dpad_cy - arrowDist - arrowS,
-                dpad_cx - arrowS, dpad_cy - arrowDist + arrowS * 0.6f,
-                dpad_cx + arrowS, dpad_cy - arrowDist + arrowS * 0.6f,
-                upR, upG, upB, upA);
+    /* Draggable Thumb Knob */
+    float knobX = s_joystickActive ? s_joystickKnobX : dpad_cx;
+    float knobY = s_joystickActive ? s_joystickKnobY : dpad_cy;
+    float knobR = dpad_r * 0.38f;
 
-    /* Down Arrow */
-    float dnR = s_pressed.down ? 0.2f : 0.85f;
-    float dnG = s_pressed.down ? 0.9f : 0.90f;
-    float dnB = s_pressed.down ? 1.0f : 0.95f;
-    float dnA = s_pressed.down ? 0.95f : 0.65f;
-    AddTriangle(dpad_cx, dpad_cy + arrowDist + arrowS,
-                dpad_cx + arrowS, dpad_cy + arrowDist - arrowS * 0.6f,
-                dpad_cx - arrowS, dpad_cy + arrowDist - arrowS * 0.6f,
-                dnR, dnG, dnB, dnA);
+    /* If dragged away from center, draw dynamic connector stem */
+    if (s_joystickActive && s_joystickMagnitude > 0.15f) {
+        AddLine(dpad_cx, dpad_cy, knobX, knobY, 3.5f, 0.25f, 0.75f, 1.0f, 0.45f);
+    }
 
-    /* Left Arrow */
-    float ltR = s_pressed.left ? 0.2f : 0.85f;
-    float ltG = s_pressed.left ? 0.9f : 0.90f;
-    float ltB = s_pressed.left ? 1.0f : 0.95f;
-    float ltA = s_pressed.left ? 0.95f : 0.65f;
-    AddTriangle(dpad_cx - arrowDist - arrowS, dpad_cy,
-                dpad_cx - arrowDist + arrowS * 0.6f, dpad_cy - arrowS,
-                dpad_cx - arrowDist + arrowS * 0.6f, dpad_cy + arrowS,
-                ltR, ltG, ltB, ltA);
-
-    /* Right Arrow */
-    float rtR = s_pressed.right ? 0.2f : 0.85f;
-    float rtG = s_pressed.right ? 0.9f : 0.90f;
-    float rtB = s_pressed.right ? 1.0f : 0.95f;
-    float rtA = s_pressed.right ? 0.95f : 0.65f;
-    AddTriangle(dpad_cx + arrowDist + arrowS, dpad_cy,
-                dpad_cx + arrowDist - arrowS * 0.6f, dpad_cy + arrowS,
-                dpad_cx + arrowDist - arrowS * 0.6f, dpad_cy - arrowS,
-                rtR, rtG, rtB, rtA);
-
-    /* Center deadzone disc */
-    AddCircle(dpad_cx, dpad_cy, layout.dpad_deadzone, 20, 0.12f, 0.15f, 0.22f, 0.65f);
+    if (s_joystickActive) {
+        /* Glowing ring around active knob */
+        AddRing(knobX, knobY, knobR, knobR + 4.5f, 28, 0.20f, 0.85f, 1.0f, 0.80f);
+        /* Knob body */
+        AddCircle(knobX, knobY, knobR, 28, 0.14f, 0.28f, 0.46f, 0.90f);
+        /* Rim */
+        AddRing(knobX, knobY, knobR - 3.0f, knobR, 28, 0.45f, 0.85f, 1.0f, 0.95f);
+        /* Center dot */
+        AddCircle(knobX, knobY, knobR * 0.32f, 16, 0.45f, 0.85f, 1.0f, 0.95f);
+    } else {
+        /* Inactive knob at center */
+        AddCircle(knobX, knobY, knobR, 28, 0.10f, 0.15f, 0.25f, 0.70f);
+        AddRing(knobX, knobY, knobR - 2.5f, knobR, 28, 0.40f, 0.65f, 0.88f, 0.60f);
+        AddCircle(knobX, knobY, knobR * 0.30f, 16, 0.25f, 0.45f, 0.68f, 0.65f);
+    }
 
     /* -------------------------------------------------------------
      * 2. Action Buttons

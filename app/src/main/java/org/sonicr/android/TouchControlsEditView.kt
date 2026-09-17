@@ -593,50 +593,41 @@ class TouchControlsEditView @JvmOverloads constructor(
         canvas.drawCircle(cx, cy, r, fillPaint)
 
         // Outer ring
-        strokePaint.color = Color.argb((0.40f * 255).toInt(), 128, 179, 230)
+        strokePaint.color = Color.argb((0.40f * 255).toInt(), 115, 166, 224)
         strokePaint.strokeWidth = 3f
         canvas.drawCircle(cx, cy, r - 1.5f, strokePaint)
 
-        // Direction arrows
-        val arrowDist = r * 0.60f
-        val arrowS = r * 0.18f
-        fillPaint.color = Color.argb((0.75f * 255).toInt(), 230, 240, 255)
+        // Deadzone guide ring
+        strokePaint.color = Color.argb((0.25f * 255).toInt(), 90, 128, 178)
+        strokePaint.strokeWidth = 2f
+        canvas.drawCircle(cx, cy, deadzone, strokePaint)
 
-        // Up arrow
-        tempPath.reset()
-        tempPath.moveTo(cx, cy - arrowDist - arrowS)
-        tempPath.lineTo(cx - arrowS, cy - arrowDist + arrowS * 0.6f)
-        tempPath.lineTo(cx + arrowS, cy - arrowDist + arrowS * 0.6f)
-        tempPath.close()
-        canvas.drawPath(tempPath, fillPaint)
+        // Cardinal tick marks
+        val tickInner = r * 0.76f
+        val tickOuter = r * 0.90f
+        strokePaint.color = Color.argb((0.40f * 255).toInt(), 204, 217, 255)
+        strokePaint.strokeWidth = 2.5f
+        // Up
+        canvas.drawLine(cx, cy - tickInner, cx, cy - tickOuter, strokePaint)
+        // Down
+        canvas.drawLine(cx, cy + tickInner, cx, cy + tickOuter, strokePaint)
+        // Left
+        canvas.drawLine(cx - tickInner, cy, cx - tickOuter, cy, strokePaint)
+        // Right
+        canvas.drawLine(cx + tickInner, cy, cx + tickOuter, cy, strokePaint)
 
-        // Down arrow
-        tempPath.reset()
-        tempPath.moveTo(cx, cy + arrowDist + arrowS)
-        tempPath.lineTo(cx + arrowS, cy + arrowDist - arrowS * 0.6f)
-        tempPath.lineTo(cx - arrowS, cy + arrowDist - arrowS * 0.6f)
-        tempPath.close()
-        canvas.drawPath(tempPath, fillPaint)
-
-        // Left arrow
-        tempPath.reset()
-        tempPath.moveTo(cx - arrowDist - arrowS, cy)
-        tempPath.lineTo(cx - arrowDist + arrowS * 0.6f, cy - arrowS)
-        tempPath.lineTo(cx - arrowDist + arrowS * 0.6f, cy + arrowS)
-        tempPath.close()
-        canvas.drawPath(tempPath, fillPaint)
-
-        // Right arrow
-        tempPath.reset()
-        tempPath.moveTo(cx + arrowDist + arrowS, cy)
-        tempPath.lineTo(cx + arrowDist - arrowS * 0.6f, cy + arrowS)
-        tempPath.lineTo(cx + arrowDist - arrowS * 0.6f, cy - arrowS)
-        tempPath.close()
-        canvas.drawPath(tempPath, fillPaint)
-
-        // Center deadzone disc
-        fillPaint.color = Color.argb((0.65f * 255).toInt(), 30, 38, 56)
-        canvas.drawCircle(cx, cy, deadzone, fillPaint)
+        // Draggable Thumb Knob preview (centered)
+        val knobR = r * 0.38f
+        // Knob body
+        fillPaint.color = Color.argb((0.70f * 255).toInt(), 26, 38, 64)
+        canvas.drawCircle(cx, cy, knobR, fillPaint)
+        // Knob rim
+        strokePaint.color = Color.argb((0.60f * 255).toInt(), 102, 166, 255)
+        strokePaint.strokeWidth = 3f
+        canvas.drawCircle(cx, cy, knobR - 1.5f, strokePaint)
+        // Knob center accent dot
+        fillPaint.color = Color.argb((0.65f * 255).toInt(), 64, 115, 173)
+        canvas.drawCircle(cx, cy, knobR * 0.30f, fillPaint)
     }
 
     private fun renderDriftL(canvas: Canvas, w: Float, h: Float) {
