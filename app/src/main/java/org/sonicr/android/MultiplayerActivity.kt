@@ -19,5 +19,8 @@ class MultiplayerActivity : Activity() {
         binding.btnBack.setOnClickListener {
             finish()
         }
+
+        val initResult = NetplayBridge.init()
+        android.util.Log.i("MultiplayerActivity", "NetplayBridge init result: $initResult (loaded=${NetplayBridge.isLibraryLoaded()})")
     }
 }
