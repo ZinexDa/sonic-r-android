@@ -27,6 +27,10 @@ class LauncherActivity : Activity() {
         binding = ActivityLauncherBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Runtime verification: Initialize Rust netplay sidecar crypto & logging
+        val initRes = NetplayBridge.init()
+        android.util.Log.i("LauncherActivity", "NetplayBridge initialized (res=$initRes, loaded=${NetplayBridge.isLibraryLoaded()})")
+
         binding.btnPlay.setOnClickListener {
             if (AssetInstaller.isAssetsInstalled(this)) {
                 launchGame()

@@ -23,4 +23,9 @@ class MultiplayerActivity : Activity() {
         val initResult = NetplayBridge.init()
         android.util.Log.i("MultiplayerActivity", "NetplayBridge init result: $initResult (loaded=${NetplayBridge.isLibraryLoaded()})")
     }
+
+    override fun onDestroy() {
+        NetplayBridge.stop()
+        super.onDestroy()
+    }
 }

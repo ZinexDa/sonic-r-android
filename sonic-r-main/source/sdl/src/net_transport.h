@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define NET_PORT_DEFAULT    7847
+#define NET_PORT_DEFAULT    5029
 #define NET_MAX_PLAYERS     4
 #define NET_MAX_PACKET      512    /* delta keyframe: 12 + 4*96 = 396 max */
 

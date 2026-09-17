@@ -23,6 +23,24 @@
 #include <string.h>
 #include <unistd.h>
 #include "endian_util.h"
+#ifndef SONICR_DC
+#include <dlfcn.h>
+#endif
+
+/* Helper to cleanly signal the Rust netplay sidecar to stop when session ends */
+static void net_sidecar_stop(void)
+{
+#ifndef SONICR_DC
+    typedef void (*netplay_stop_fn)(void);
+    void *handle = dlopen("libsonicr_netplay.so", RTLD_NOW | RTLD_NOLOAD);
+    if (handle) {
+        netplay_stop_fn fn = (netplay_stop_fn)dlsym(handle, "netplay_stop");
+        if (fn) {
+            fn();
+        }
+    }
+#endif
+}
 
 extern void platform_pump_events(void);
 
@@ -992,6 +1010,7 @@ void CloseDirectPlaySession(void)
 
     NetRecvThread_Stop();
     net_close();
+    net_sidecar_stop();
     DebugLog("Session Closed & Player Destroyed.\n");
 }
 

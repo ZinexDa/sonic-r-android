@@ -38,6 +38,7 @@ class GameActivity : SDLActivity() {
 
     override fun getLibraries(): Array<String> {
         return arrayOf(
+            "sonicr_netplay",
             "SDL2",
             "main"
         )
@@ -149,6 +150,7 @@ class GameActivity : SDLActivity() {
     }
 
     override fun onDestroy() {
+        NetplayBridge.stop()
         // Terminate the isolated :game process immediately.
         // We intentionally do NOT call super.onDestroy() because SDLActivity.onDestroy()
         // calls mSDLThread.join() which hangs forever (the decompiled C engine runs an

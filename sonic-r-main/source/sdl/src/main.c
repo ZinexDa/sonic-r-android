@@ -264,12 +264,10 @@ int JoinNetworkSession(const char *name, int enumIdx)
         strncpy(hostIp, g_cmdHostIP, sizeof(hostIp) - 1);
         hostIp[sizeof(hostIp) - 1] = '\0';
     }
-    /* LAN discovery fallback */
+    /* Default to localhost loopback for Rust P2P netplay sidecar */
     else {    
-        if (net_discover_check(hostIp, sizeof(hostIp)) != 1) {
-            DebugLog("JoinNetworkSession: no host found yet\n");
-            return 0;
-        }
+        strncpy(hostIp, "127.0.0.1", sizeof(hostIp) - 1);
+        hostIp[sizeof(hostIp) - 1] = '\0';
     }
 
     if (net_client_connect(hostIp, port) == 0) {
