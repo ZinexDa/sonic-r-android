@@ -34,6 +34,14 @@ class GameActivity : SDLActivity() {
             lookX: Float, lookY: Float, lookScale: Float,
             startX: Float, startY: Float, startScale: Float
         )
+
+        @JvmStatic
+        external fun nativeSetNetplayMode(
+            isNetplay: Boolean,
+            isHost: Boolean,
+            hostIp: String,
+            port: Int
+        )
     }
 
     override fun getLibraries(): Array<String> {
@@ -44,16 +52,54 @@ class GameActivity : SDLActivity() {
         )
     }
 
+    override fun getArguments(): Array<String> {
+        val isNetplay = intent?.getBooleanExtra("IS_NETPLAY", false) ?: false
+        if (!isNetplay) {
+            return emptyArray()
+        }
+        val isHost = intent?.getBooleanExtra("IS_HOST", true) ?: true
+        val port = intent?.getIntExtra("GAME_PORT", 5029) ?: 5029
+        val args = mutableListOf<String>()
+        if (isHost) {
+            args.add("-H")
+        } else {
+            args.add("-J")
+        }
+        args.add("-h")
+        args.add("127.0.0.1")
+        args.add("-p")
+        args.add(port.toString())
+        Log.i(TAG, "Passing SDL arguments for netplay: $args")
+        return args.toTypedArray()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyNetplaySettings()
         applyAudioSettings()
         applyControlSettings()
     }
 
     override fun onResume() {
         super.onResume()
+        applyNetplaySettings()
         applyAudioSettings()
         applyControlSettings()
+    }
+
+    private fun applyNetplaySettings() {
+        val isNetplay = intent?.getBooleanExtra("IS_NETPLAY", false) ?: false
+        if (!isNetplay) return
+        val isHost = intent?.getBooleanExtra("IS_HOST", true) ?: true
+        val port = intent?.getIntExtra("GAME_PORT", 5029) ?: 5029
+        try {
+            Log.i(TAG, "Applying netplay settings: isHost=$isHost, port=$port")
+            nativeSetNetplayMode(true, isHost, "127.0.0.1", port)
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "Native netplay method not yet linked: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to apply netplay settings: ${e.message}")
+        }
     }
 
     private fun applyAudioSettings() {

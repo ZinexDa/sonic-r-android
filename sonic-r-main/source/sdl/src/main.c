@@ -179,6 +179,29 @@ int g_cmdAutoJoin = 0;
 static char s_cmdDataDir[512];
 static int s_hasExplicitDataDir = 0;
 
+void Engine_SetNetplayAutoMode(int isHost, const char *hostIp, int port)
+{
+    if (isHost) {
+        g_cmdAutoHost = 1;
+        g_cmdAutoJoin = 0;
+    } else {
+        g_cmdAutoHost = 0;
+        g_cmdAutoJoin = 1;
+    }
+    if (hostIp != NULL && hostIp[0] != '\0') {
+        static char s_engineHostIp[64];
+        strncpy(s_engineHostIp, hostIp, sizeof(s_engineHostIp) - 1);
+        s_engineHostIp[sizeof(s_engineHostIp) - 1] = '\0';
+        g_cmdHostIP = s_engineHostIp;
+    } else {
+        g_cmdHostIP = "127.0.0.1";
+    }
+    if (port > 0) {
+        s_cmdPort = port;
+    }
+    DebugLog("Engine_SetNetplayAutoMode: host=%d, hostIp=%s, port=%d\n", isHost, g_cmdHostIP, s_cmdPort);
+}
+
 extern void UpdateFlyoverCamera(Player *player, CamStateEntry *cam, RenderCamera *outStruct,
                                  int *waypointTable, int param5, int vpIdx);
 

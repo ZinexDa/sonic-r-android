@@ -389,3 +389,44 @@ Java_org_sonicr_android_GameActivity_nativeSetControlLayout(
     }
 }
 
+/* =====================================================================
+ * Menu / Lobby Controller Buttons (F-key synthesis)
+ * ===================================================================== */
+
+unsigned int platform_menu_buttons(void)
+{
+    unsigned int m = 0;
+    if (s_keystate[0x39]) m |= MENUBTN_A;     /* Button A (Confirm / Jump) -> F1 */
+    if (s_keystate[0x1E]) m |= MENUBTN_B;     /* Button B (Back / Accel) */
+    if (s_keystate[0x1C]) m |= MENUBTN_START; /* Start / Return -> F1 */
+    if (s_keystate[0xC8]) m |= MENUBTN_UP;    /* Up -> F8 */
+    if (s_keystate[0xD0]) m |= MENUBTN_DOWN;  /* Down -> F8 */
+    if (s_keystate[0xCB]) m |= MENUBTN_LEFT;  /* Left -> F6 */
+    if (s_keystate[0xCD]) m |= MENUBTN_RIGHT; /* Right -> F6 */
+    if (s_keystate[0x2C]) m |= MENUBTN_L;     /* Drift L -> F7 */
+    if (s_keystate[0x2D]) m |= MENUBTN_R;     /* Drift R -> F2 */
+    return m;
+}
+
+/* =====================================================================
+ * JNI Netplay Mode Config (called from GameActivity.kt)
+ * ===================================================================== */
+
+extern void Engine_SetNetplayAutoMode(int isHost, const char *hostIp, int port);
+
+JNIEXPORT void JNICALL
+Java_org_sonicr_android_GameActivity_nativeSetNetplayMode(
+    JNIEnv *env, jclass clazz,
+    jboolean isNetplay, jboolean isHost, jstring hostIp, jint port)
+{
+    (void)clazz;
+    if (isNetplay) {
+        const char *ipStr = hostIp ? (*env)->GetStringUTFChars(env, hostIp, NULL) : NULL;
+        Engine_SetNetplayAutoMode(isHost ? 1 : 0, ipStr ? ipStr : "127.0.0.1", (int)port);
+        if (ipStr && hostIp) {
+            (*env)->ReleaseStringUTFChars(env, hostIp, ipStr);
+        }
+    }
+}
+
+
