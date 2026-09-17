@@ -12,8 +12,8 @@ android {
         applicationId = "org.sonicr.android"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         externalNativeBuild {
             cmake {
