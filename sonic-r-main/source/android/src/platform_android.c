@@ -809,6 +809,7 @@ unsigned int platform_menu_buttons(void)
  * ===================================================================== */
 
 extern void Engine_SetNetplayAutoMode(int isHost, const char *hostIp, int port);
+extern void net_set_client_bind_port(int port);
 
 JNIEXPORT void JNICALL
 Java_org_sonicr_android_GameActivity_nativeSetNetplayMode(
@@ -819,6 +820,13 @@ Java_org_sonicr_android_GameActivity_nativeSetNetplayMode(
     if (isNetplay) {
         const char *ipStr = hostIp ? (*env)->GetStringUTFChars(env, hostIp, NULL) : NULL;
         Engine_SetNetplayAutoMode(isHost ? 1 : 0, ipStr ? ipStr : "127.0.0.1", (int)port);
+        if (!isHost) {
+            net_set_client_bind_port(5031);
+            SDL_Log("nativeSetNetplayMode: configured client internal bind port 5031, target %s:%d",
+                    ipStr ? ipStr : "127.0.0.1", (int)port);
+        } else {
+            SDL_Log("nativeSetNetplayMode: configured host internal port %d", (int)port);
+        }
         if (ipStr && hostIp) {
             (*env)->ReleaseStringUTFChars(env, hostIp, ipStr);
         }

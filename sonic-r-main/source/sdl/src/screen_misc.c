@@ -5060,10 +5060,10 @@ int NetworkScreen(void)
     /* Local variables (stack frame at ebp-0x34) */
     int modeModelLocal[2];                                   /* [ebp-0x34] */
     int inputThrottle;                                       /* [ebp-0x2C] */
-    int localTrackIdx;                                       /* [ebp-0x28] */
+    int localTrackIdx = 0;                                   /* [ebp-0x28] */
     int firstFrame;                                          /* [ebp-0x24] */
     int inputLock;                                           /* [ebp-0x20] */
-    int localModeIdx;                                       /* [ebp-0x1C] */
+    int localModeIdx = 0;                                   /* [ebp-0x1C] */
     DWORD lastTickSec;                                       /* [ebp-0x18] */
     MatchmakerSessionList g_mmSessionList;
     memset(&g_mmSessionList, 0, sizeof(g_mmSessionList));
@@ -5384,7 +5384,13 @@ int NetworkScreen(void)
                 else {
                     DebugLog("Matchmaker: hasToken=0 or direct host IP set, falling back to LAN/direct\n");
                     NetDbgPush("NO TOKEN - LAN DISCOVERY");
-                    ns_lobbyState = 1;
+                    if (JoinNetworkSession(NS_STR_JOIN_SESSION, 0)) {
+                        ns_lobbyState = 2;
+                        EnumNetworkSessions(1);
+                        g_netEnumActive = 1;
+                    } else {
+                        ns_lobbyState = 1;
+                    }
                 }
             }
             /* Provider choices 2,3 (modem/serial) stripped */
@@ -5404,7 +5410,7 @@ int NetworkScreen(void)
             }
 
             /* Join path: try matchmaker sessions first, then LAN. */
-            if (ns_setupMode == 2 && g_resultsUnlockFlag != 0) {
+            if (ns_setupMode == 2) {
                 int joined = 0;
                 extern const char *g_cmdHostIP;
                 if (MatchmakerHasToken() && g_mmSessionList.count > 0 && g_cmdHostIP == NULL) {

@@ -56,6 +56,10 @@ typedef int net_socket_t;
 #define NET_WOULD_BLOCK(e) ((e) == EAGAIN || (e) == EWOULDBLOCK)
 #endif
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 /* =====================================================================
  * Internal state
  * ===================================================================== */
@@ -203,6 +207,18 @@ int net_host_start(int port)
     return 0;
 }
 
+static int s_clientBindPort = 5031;
+
+void net_set_client_bind_port(int port)
+{
+    s_clientBindPort = port;
+}
+
+int net_get_client_bind_port(void)
+{
+    return s_clientBindPort;
+}
+
 int net_client_connect(const char *host_ip, int port)
 {
     if (s_active) net_close();
@@ -213,16 +229,31 @@ int net_client_connect(const char *host_ip, int port)
         return -1;
     }
 
-    /* Bind to any port so we can receive replies */
+    /* Allow address reuse for quick restart */
+    int reuse = 1;
+    setsockopt(s_socket, SOL_SOCKET, SO_REUSEADDR, (const char *)&reuse, sizeof(reuse));
+
+    /* Bind internally to s_clientBindPort (default 5031) so sidecar knows destination */
     struct sockaddr_in local;
     memset(&local, 0, sizeof(local));
     local.sin_family = AF_INET;
     local.sin_addr.s_addr = INADDR_ANY;
-    local.sin_port = 0;  /* OS assigns ephemeral port */
+    local.sin_port = htons((unsigned short)(s_clientBindPort > 0 ? s_clientBindPort : 0));
     if (bind(s_socket, (struct sockaddr *)&local, sizeof(local)) < 0) {
-        fprintf(stderr, "net: client bind failed (err %d)\n", NET_LAST_ERROR());
-        socket_close_if_valid(&s_socket);
-        return -1;
+        if (s_clientBindPort > 0) {
+            fprintf(stderr, "net: client bind(%d) failed (err %d), falling back to ephemeral port\n",
+                    s_clientBindPort, NET_LAST_ERROR());
+            local.sin_port = 0;
+            if (bind(s_socket, (struct sockaddr *)&local, sizeof(local)) < 0) {
+                fprintf(stderr, "net: client bind failed (err %d)\n", NET_LAST_ERROR());
+                socket_close_if_valid(&s_socket);
+                return -1;
+            }
+        } else {
+            fprintf(stderr, "net: client bind failed (err %d)\n", NET_LAST_ERROR());
+            socket_close_if_valid(&s_socket);
+            return -1;
+        }
     }
 
     set_nonblocking(s_socket);
@@ -241,7 +272,12 @@ int net_client_connect(const char *host_ip, int port)
     s_active = 1;
     s_localSlot = -1;  /* assigned by host later */
 
-    fprintf(stderr, "net: connecting to %s:%d\n", host_ip, port);
+    fprintf(stderr, "net: connecting to %s:%d (client internal port %d)\n", host_ip, port, s_clientBindPort);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "SonicRNetplay",
+                        "net_client_connect: connecting to %s:%d (client internal port %d, fd=%d)",
+                        host_ip, port, s_clientBindPort, s_socket);
+#endif
     return 0;
 }
 
@@ -284,6 +320,11 @@ int net_send_to_host(const void *data, int len)
         printf("[NET_DEBUG] net_send_to_host: sent %d bytes (hdr=0x%08X, ret=%d) to host %s:%d\n",
                len, hdr, (int)n, inet_ntoa(s_hostAddr.sin_addr), ntohs(s_hostAddr.sin_port));
         fflush(stdout);
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_INFO, "SonicRNetplay",
+                            "net_send_to_host: sent %d bytes (hdr=0x%08X, ret=%d) to host %s:%d",
+                            len, hdr, (int)n, inet_ntoa(s_hostAddr.sin_addr), ntohs(s_hostAddr.sin_port));
+#endif
     }
     return (int)n;
 }

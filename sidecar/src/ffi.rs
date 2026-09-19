@@ -79,12 +79,12 @@ pub extern "C" fn netplay_start_host(
 
     let task = rt.spawn(async move {
         let (hub_ws_url, hub_udp_addr) = crate::resolve_hub_addr_async(&hub_str).await;
-        log::info!("Host task: resolved ws={}, udp={:?}", hub_ws_url, hub_udp_addr);
+        let bind_port = if port == 5029 { 0 } else { 5029 };
         let config = HostConfig {
             hub_ws_url,
             hub_udp_addr,
             name,
-            bind_port: 0,
+            bind_port,
             target_game_addr: Some(SocketAddr::from(([127, 0, 0, 1], port))),
         };
 
@@ -147,7 +147,8 @@ pub extern "C" fn netplay_start_join(
         _ => None, // Auto-selects first available server
     };
 
-    let bind_port = if game_port == 0 { 5029 } else { game_port };
+    let engine_port = if game_port == 0 || game_port == 5029 { 5031 } else { game_port };
+    let bind_port = 5029;
 
     let rt = match crate::get_or_create_runtime() {
         Ok(r) => r,
@@ -160,8 +161,8 @@ pub extern "C" fn netplay_start_join(
     // Stop any previously running session
     crate::stop_active_session();
 
-    log::info!("netplay_start_join: hub={}, server_id={:?}, port={}", hub_str, server_id, bind_port);
-    tracing::info!(hub = %hub_str, ?server_id, bind_port, "Starting netplay join session");
+    log::info!("netplay_start_join: hub={}, server_id={:?}, engine_port={}, proxy_bind_port={}", hub_str, server_id, engine_port, bind_port);
+    tracing::info!(hub = %hub_str, ?server_id, engine_port, bind_port, "Starting netplay join session");
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<RunnerEvent>(64);
 
@@ -173,7 +174,7 @@ pub extern "C" fn netplay_start_join(
             hub_udp_addr,
             server_id,
             bind_port,
-            target_game_addr: None,
+            target_game_addr: Some(SocketAddr::from(([127, 0, 0, 1], engine_port))),
         };
 
         tokio::spawn(async move {

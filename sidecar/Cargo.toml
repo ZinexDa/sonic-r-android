@@ -1,6 +1,6 @@
 [package]
 name = "sonicr_netplay"
-version = "0.1.0"
+version = "1.2.2"
 edition = "2021"
 
 [lib]

@@ -167,6 +167,8 @@ int net_host_start(int port);
  * records the target. Returns 0 on success, -1 on failure.
  */
 int net_client_connect(const char *host_ip, int port);
+void net_set_client_bind_port(int port);
+int net_get_client_bind_port(void);
 
 /**
  * Send a packet to the host (client → host).

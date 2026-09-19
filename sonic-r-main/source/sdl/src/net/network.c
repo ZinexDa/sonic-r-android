@@ -79,6 +79,7 @@ void net_sidecar_stop(void)
 }
 
 extern void platform_pump_events(void);
+void EnumNetworkSessions(int flag);
 
 /* =====================================================================
  * Receive thread — packet ring buffer
@@ -389,7 +390,7 @@ static void send_client_join_request(void)
     if (s_haveSlotAssign) return;
 
     DWORD now = timeGetTime();
-    if (s_lastJoinReqMs != 0 && (now - s_lastJoinReqMs < 1000)) {
+    if (s_lastJoinReqMs != 0 && (now - s_lastJoinReqMs < 500)) {
         return;
     }
     s_lastJoinReqMs = now;
@@ -1433,11 +1434,17 @@ void InitNetworkGame(void)
      * g_netTrackIndex (0x68A8A0) and g_netRaceSubModeIndex (0x68A8A2)
      * overlapped g_netGameInfoDest[1] at the same address.  The lobby
      * writes track/mode into [1]; race init reads g_netTrackIndex.
-     * In C these are separate variables, so copy explicitly. */
-    g_netTrackIndex       = (int)(short)(g_netGameInfoDest[1] & 0xFFFF);       /* [1] low word */
-    g_netRaceSubModeIndex = (int)(short)(g_netGameInfoDest[1] >> 16);        /* [1] high word */
-    g_netWeatherType      = (int)(short)(g_netGameInfoDest[2] & 0xFFFF);     /* [2] low word */
-    g_netPlayerMode       = (int)(short)(g_netGameInfoDest[2] >> 16);        /* [2] high word */
+     * In C these are separate variables, so copy explicitly on host.
+     * On client, these were already set from the host's START_GAME packet. */
+    if (net_is_host()) {
+        g_netTrackIndex       = (int)(short)(g_netGameInfoDest[1] & 0xFFFF);       /* [1] low word */
+        g_netRaceSubModeIndex = (int)(short)(g_netGameInfoDest[1] >> 16);        /* [1] high word */
+        g_netWeatherType      = (int)(short)(g_netGameInfoDest[2] & 0xFFFF);     /* [2] low word */
+        g_netPlayerMode       = (int)(short)(g_netGameInfoDest[2] >> 16);        /* [2] high word */
+    }
+    if (g_netTrackIndex < 0 || g_netTrackIndex >= 5) {
+        g_netTrackIndex = 0;
+    }
 
     /* SDL: host tells clients to start the game — includes track/mode and
      * per-player character IDs so the client can populate player
@@ -1549,6 +1556,11 @@ void ApplyNetworkPlayerState(void)
             }
             send_client_join_request();
         }
+    }
+
+    /* Client join request retry while waiting for host slot assignment */
+    if (!net_is_host() && !s_haveSlotAssign && net_is_active()) {
+        send_client_join_request();
     }
 
     /* Process all pending network messages */
@@ -1809,11 +1821,15 @@ void ApplyNetworkPlayerState(void)
                     : NULL;
 
                 int s;
+                int initialCount = slot + 1;
                 for (s = 0; s < NET_MAX_PLAYERS; s++) {
                     char nm[MM_MAX_USERNAME];
                     memcpy(nm, names + s * MM_MAX_USERNAME, MM_MAX_USERNAME);
                     nm[MM_MAX_USERNAME - 1] = '\0';
                     if (nm[0] == '\0') continue;
+                    if (s + 1 > initialCount) {
+                        initialCount = s + 1;
+                    }
                     char *entry = g_netPlayerDecorations + s * NET_DECO_STRIDE;
                     *(int *)(entry + NET_DECO_DPID) = s;
                     *(unsigned short *)(entry + NET_DECO_SLOT) = (unsigned short)s;
@@ -1826,8 +1842,13 @@ void ApplyNetworkPlayerState(void)
                         net_set_slot_platform(s, plat, regions[s]);
                     }
                 }
-                DebugLog("Client: SLOT_ASSIGN slot=%d, host='%s'\n",
-                         slot, net_get_slot_name(0));
+                g_netPlayerCount = initialCount;
+                g_resultsPlayerCount = initialCount;
+                g_playerBase[slot].charId = g_menuPlayer.charId;
+                *(int *)(g_netPlayerDecorations + slot * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)g_menuPlayer.charId;
+                EnumNetworkSessions(0);
+                DebugLog("Client: SLOT_ASSIGN slot=%d, playerCount=%d, host='%s'\n",
+                         slot, g_netPlayerCount, net_get_slot_name(0));
                 s_haveSlotAssign = 1;
                 if (g_resultsState < 2) {
                     g_resultsState = 2;
@@ -1843,6 +1864,10 @@ void ApplyNetworkPlayerState(void)
              * the real name. */
             int slot = rl32s(buf + 4);
             if (slot >= 0 && slot < NET_MAX_PLAYERS) {
+                if (slot + 1 > g_netPlayerCount) {
+                    g_netPlayerCount = slot + 1;
+                    g_resultsPlayerCount = g_netPlayerCount;
+                }
                 char nm[MM_MAX_USERNAME];
                 memcpy(nm, buf + 8, MM_MAX_USERNAME);
                 nm[MM_MAX_USERNAME - 1] = '\0';

@@ -283,13 +283,13 @@ pub async fn run_relay_keepalive(
     }
 }
 
-struct PeerCountGuard {
+pub struct PeerCountGuard {
     active_peers: Option<Arc<AtomicU32>>,
     ws_cmd_tx: tokio::sync::mpsc::UnboundedSender<proto::ClientMessage>,
 }
 
 impl PeerCountGuard {
-    fn new(
+    pub fn new(
         active_peers: Option<Arc<AtomicU32>>,
         ws_cmd_tx: tokio::sync::mpsc::UnboundedSender<proto::ClientMessage>,
     ) -> Self {
@@ -349,6 +349,7 @@ pub async fn manage_peer_connection(
         punch_token,
         ws_cmd_tx,
         relay_rx,
+        None,
         bind_port,
         target_game_addr,
         None,
@@ -366,17 +367,44 @@ pub async fn manage_peer_connection_with_events(
     punch_token: PunchToken,
     ws_cmd_tx: tokio::sync::mpsc::UnboundedSender<proto::ClientMessage>,
     mut relay_rx: tokio::sync::broadcast::Receiver<SocketAddr>,
+    cached_relay: Option<SocketAddr>,
     bind_port: u16,
     target_game_addr: Option<SocketAddr>,
     event_tx: Option<tokio::sync::mpsc::Sender<crate::runner::RunnerEvent>>,
     active_peers: Option<Arc<AtomicU32>>,
     ws_tunnel: Option<crate::loopback::WsTunnelChannels>,
 ) {
+    let is_single_port = |addr: &SocketAddr| {
+        (addr.ip().is_loopback() && addr.port() == 9001) || addr.port() == 9001
+    };
+
     let force_relay = std::env::var("SIDECAR_FORCE_RELAY")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
 
-    let relay_target = if force_relay {
+    let has_ws_tunnel = ws_tunnel.is_some();
+    let relay_target: Option<SocketAddr> = if let Some(addr) = cached_relay.filter(|a| is_single_port(a)) {
+        tracing::info!(
+            %addr,
+            %punch_token,
+            "[Single-Port] Single-port WebSocket relay (127.0.0.1:9001) detected; suppressing UDP hole punch"
+        );
+        Some(addr)
+    } else if is_single_port(&peer_addr) {
+        tracing::info!(
+            %peer_addr,
+            %punch_token,
+            "[Single-Port] Peer target is single-port relay (127.0.0.1:9001); suppressing UDP hole punch"
+        );
+        Some(peer_addr)
+    } else if has_ws_tunnel {
+        tracing::info!(
+            %punch_token,
+            "[Single-Port] WebSocket tunnel active; bypassing 10-second UDP hole punch and activating relay immediately"
+        );
+        let _ = ws_cmd_tx.send(proto::ClientMessage::RelayFallback { punch_token });
+        Some(SocketAddr::from(([127, 0, 0, 1], 9001)))
+    } else if force_relay {
         tracing::info!(
             %punch_token,
             "[DEBUG] SIDECAR_FORCE_RELAY is set; bypassing direct punch and requesting relay fallback"
@@ -397,36 +425,11 @@ pub async fn manage_peer_connection_with_events(
         let mut confirmed_peer = peer_addr;
 
         tokio::select! {
-            biased;
-
-            punch_res = &mut punch_fut => {
-                match punch_res {
-                    Ok(addr) => {
-                        direct_succeeded = true;
-                        confirmed_peer = addr;
-                    }
-                    Err(PunchError::Timeout) => {
-                        tracing::info!(
-                            %peer_addr,
-                            "Direct hole punch timed out; requesting relay fallback from hub"
-                        );
-                        let _ = ws_cmd_tx.send(proto::ClientMessage::RelayFallback { punch_token });
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            %peer_addr,
-                            %err,
-                            "Direct hole punch encountered error; requesting relay fallback"
-                        );
-                        let _ = ws_cmd_tx.send(proto::ClientMessage::RelayFallback { punch_token });
-                    }
-                }
-            }
             early_relay = relay_rx.recv() => {
                 if let Ok(addr) = early_relay {
                     tracing::info!(
                         %addr,
-                        "Received UseRelay while direct punch in progress; switching to relay mode"
+                        "Received UseRelay while direct punch in progress; switching to relay mode immediately"
                     );
                     if let Some(ref tx) = event_tx {
                         let _ = tx.send(crate::runner::RunnerEvent::TunnelEstablished {
@@ -450,6 +453,29 @@ pub async fn manage_peer_connection_with_events(
                         tracing::error!(%err, "Tunnel session error in relay mode");
                     }
                     return;
+                }
+            }
+            punch_res = &mut punch_fut => {
+                match punch_res {
+                    Ok(addr) => {
+                        direct_succeeded = true;
+                        confirmed_peer = addr;
+                    }
+                    Err(PunchError::Timeout) => {
+                        tracing::info!(
+                            %peer_addr,
+                            "Direct hole punch timed out; requesting relay fallback from hub"
+                        );
+                        let _ = ws_cmd_tx.send(proto::ClientMessage::RelayFallback { punch_token });
+                    }
+                    Err(err) => {
+                        tracing::error!(
+                            %peer_addr,
+                            %err,
+                            "Direct hole punch encountered error; requesting relay fallback"
+                        );
+                        let _ = ws_cmd_tx.send(proto::ClientMessage::RelayFallback { punch_token });
+                    }
                 }
             }
         }
@@ -481,12 +507,16 @@ pub async fn manage_peer_connection_with_events(
             return;
         }
 
-        // Direct punch failed, await UseRelay from hub with 5s timeout
-        match tokio::time::timeout(Duration::from_secs(5), relay_rx.recv()).await {
-            Ok(Ok(addr)) => Some(addr),
-            _ => {
-                tracing::error!("No direct path found and relay coordination failed; connection failed");
-                None
+        // Direct punch failed, check cached_relay first or await UseRelay from hub with 5s timeout
+        if let Some(addr) = cached_relay {
+            Some(addr)
+        } else {
+            match tokio::time::timeout(Duration::from_secs(5), relay_rx.recv()).await {
+                Ok(Ok(addr)) => Some(addr),
+                _ => {
+                    tracing::error!("No direct path found and relay coordination failed; connection failed");
+                    None
+                }
             }
         }
     };

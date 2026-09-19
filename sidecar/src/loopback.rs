@@ -86,7 +86,18 @@ pub async fn run_tunnel_session_with_events_and_ws(
     ws_tunnel: Option<WsTunnelChannels>,
 ) -> Result<(), std::io::Error> {
     let local_game_bind = SocketAddr::from(([127, 0, 0, 1], bind_port));
-    let game_sock = UdpSocket::bind(local_game_bind).await?;
+    let game_sock = match UdpSocket::bind(local_game_bind).await {
+        Ok(sock) => sock,
+        Err(err)
+            if bind_port != 0
+                && (err.kind() == std::io::ErrorKind::AddrInUse || err.raw_os_error() == Some(98)) =>
+        {
+            tracing::warn!(bind_port, %err, "Loopback bind port already in use; falling back to ephemeral port");
+            log::warn!("Loopback bind port {} already in use; falling back to ephemeral port: {}", bind_port, err);
+            UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await?
+        }
+        Err(err) => return Err(err),
+    };
     let bound_port = game_sock.local_addr()?.port();
     if let Some(ref tx) = event_tx {
         let _ = tx.send(crate::runner::RunnerEvent::ProxyBound { port: bound_port }).await;
@@ -184,9 +195,14 @@ pub async fn run_tunnel_session_full(
     ping_pkt[16] = MSG_TYPE_KEEPALIVE;
     ping_pkt[17..21].copy_from_slice(b"PING");
 
+    let is_single_port = (target_addr.ip().is_loopback() && target_addr.port() == 9001) || target_addr.port() == 9001;
+    if is_single_port {
+        tracing::info!(%target_addr, "Single-port WebSocket datagram tunneling activated");
+    }
+
     let mut keepalive_timer = tokio::time::interval(KEEPALIVE_INTERVAL);
-    // If starting in relay mode, immediately register endpoint with relay
-    if is_relay {
+    // If starting in relay mode, immediately register endpoint with relay (skip if single-port)
+    if is_relay && !is_single_port {
         if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
             if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
                 tracing::warn!(%target_addr, %err, "Failed sending initial tunnel keepalive to relay");
@@ -219,6 +235,19 @@ pub async fn run_tunnel_session_full(
 
                         out_pkt[17..17 + n].copy_from_slice(&game_buf[..n]);
                         let full_pkt = &out_pkt[..17 + n];
+
+                        let cur_is_single_port = (target_addr.ip().is_loopback() && target_addr.port() == 9001) || target_addr.port() == 9001;
+                        if cur_is_single_port {
+                            if let Some(ref ws) = ws_tunnel {
+                                if let Err(err) = ws.out_tx.send(full_pkt.to_vec()) {
+                                    tracing::warn!(%err, "Failed sending game datagram to WebSocket tunnel");
+                                } else {
+                                    tracing::info!(payload_len = n, "Tunneled local game datagram (with 17-byte header) via WebSocket");
+                                    log::info!("Tunneled local game datagram ({} bytes with 17-byte header) via WebSocket", n);
+                                }
+                            }
+                            continue;
+                        }
 
                         // Forward to UDP target unless target is loopback when WS tunnel is available
                         if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
@@ -313,21 +342,17 @@ pub async fn run_tunnel_session_full(
                             }
                             MSG_TYPE_GAME_DATA => {
                                 let payload = &tunnel_buf[17..n];
-                                let dest_game_addr = last_game_addr.or(initial_game_addr);
-                                if let Some(game_addr) = dest_game_addr {
-                                    if last_game_addr.is_none() {
-                                        last_game_addr = Some(game_addr);
-                                    }
-                                    if let Err(err) = game_sock.send_to(payload, game_addr).await {
-                                        tracing::warn!(%game_addr, %err, "Failed delivering game datagram to local game process");
-                                    } else {
-                                        tracing::trace!(%game_addr, payload_len = payload.len(), "Delivered game datagram to local game process");
-                                    }
+                                let dest_game_addr = last_game_addr
+                                    .or(initial_game_addr)
+                                    .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 5029)));
+
+                                if last_game_addr.is_none() {
+                                    last_game_addr = Some(dest_game_addr);
+                                }
+                                if let Err(err) = game_sock.send_to(payload, dest_game_addr).await {
+                                    tracing::warn!(%dest_game_addr, %err, "Failed delivering game datagram to local game process");
                                 } else {
-                                    tracing::debug!(
-                                        payload_len = payload.len(),
-                                        "Dropping incoming game datagram: no local game process has sent packets yet to learn destination port"
-                                    );
+                                    tracing::trace!(%dest_game_addr, payload_len = payload.len(), "Delivered game datagram to local game process");
                                 }
                             }
                             other => {
@@ -354,39 +379,39 @@ pub async fn run_tunnel_session_full(
                 }
             } => {
                 if let Ok(pkt) = ws_pkt_res {
-                    if pkt.len() >= 17 && &pkt[..16] == token_bytes {
-                        let msg_type = pkt[16];
-                        match msg_type {
-                            MSG_TYPE_KEEPALIVE => {
-                                tracing::debug!(len = pkt.len() - 17, "Received WS tunnel keepalive");
-                            }
-                            MSG_TYPE_GAME_DATA => {
-                                let payload = &pkt[17..];
-                                let dest_game_addr = last_game_addr.or(initial_game_addr);
-                                if let Some(game_addr) = dest_game_addr {
-                                    if last_game_addr.is_none() {
-                                        last_game_addr = Some(game_addr);
-                                    }
-                                    if let Err(err) = game_sock.send_to(payload, game_addr).await {
-                                        tracing::warn!(%game_addr, %err, "Failed delivering WS tunnel datagram to local game process");
-                                    } else {
-                                        tracing::trace!(%game_addr, payload_len = payload.len(), "Delivered WS tunnel datagram to local game process");
-                                    }
-                                } else {
-                                    tracing::debug!(
-                                        payload_len = payload.len(),
-                                        "Dropping incoming WS tunnel datagram: no local game process has sent packets yet to learn destination port"
-                                    );
-                                }
-                            }
-                            _ => {}
-                        }
+                    // Support both 17-byte framed packets ([16-byte token][0x01][data]) and raw datagrams
+                    let payload: &[u8] = if pkt.len() >= 17 && pkt[16] == MSG_TYPE_GAME_DATA {
+                        &pkt[17..]
+                    } else if pkt.len() >= 17 && pkt[16] == MSG_TYPE_KEEPALIVE {
+                        tracing::debug!(len = pkt.len() - 17, "Received WS tunnel keepalive");
+                        continue;
+                    } else {
+                        &pkt[..]
+                    };
+
+                    let dest_game_addr = last_game_addr
+                        .or(initial_game_addr)
+                        .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 5029)));
+
+                    if last_game_addr.is_none() {
+                        last_game_addr = Some(dest_game_addr);
+                    }
+
+                    if let Err(err) = game_sock.send_to(payload, dest_game_addr).await {
+                        tracing::warn!(%dest_game_addr, %err, "Failed delivering WS tunnel datagram to local game process");
+                    } else {
+                        tracing::info!(%dest_game_addr, payload_len = payload.len(), "Delivered WS tunnel datagram to local game process");
+                        log::info!("Delivered WS tunnel datagram ({} bytes) to local game process at {}", payload.len(), dest_game_addr);
                     }
                 }
             }
 
             // 4. Periodic tunnel keepalive
             _ = keepalive_timer.tick() => {
+                let cur_is_single_port = (target_addr.ip().is_loopback() && target_addr.port() == 9001) || target_addr.port() == 9001;
+                if cur_is_single_port {
+                    continue;
+                }
                 if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
                     if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
                         tracing::warn!(%target_addr, %err, "Failed sending tunnel keepalive");
@@ -417,15 +442,18 @@ pub async fn run_tunnel_session_full(
                         );
                         target_addr = new_relay_addr;
                         is_relay = true;
-                        if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
-                            if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
-                                tracing::warn!(%target_addr, %err, "Failed sending immediate keepalive to relay");
-                            } else {
-                                tracing::debug!(%target_addr, "Sent immediate keepalive to relay");
+                        let is_now_single_port = (target_addr.ip().is_loopback() && target_addr.port() == 9001) || target_addr.port() == 9001;
+                        if !is_now_single_port {
+                            if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
+                                if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
+                                    tracing::warn!(%target_addr, %err, "Failed sending immediate keepalive to relay");
+                                } else {
+                                    tracing::debug!(%target_addr, "Sent immediate keepalive to relay");
+                                }
                             }
-                        }
-                        if let Some(ref ws) = ws_tunnel {
-                            let _ = ws.out_tx.send(ping_pkt.to_vec());
+                            if let Some(ref ws) = ws_tunnel {
+                                let _ = ws.out_tx.send(ping_pkt.to_vec());
+                            }
                         }
                     }
                 }

@@ -55,8 +55,11 @@ pub struct JoinConfig {
 pub async fn punch_udp(hub_udp_addr: SocketAddr, token: PunchToken) -> Result<UdpSocket, std::io::Error> {
     let sock = UdpSocket::bind("0.0.0.0:0").await?;
     let bytes = token.as_bytes();
-    sock.send_to(bytes, hub_udp_addr).await?;
-    tracing::info!(%hub_udp_addr, %token, "Sent 16-byte UDP punch packet to hub");
+    if let Err(err) = sock.send_to(bytes, hub_udp_addr).await {
+        tracing::debug!(%hub_udp_addr, %err, "UDP punch to hub failed (likely single-port mode with UDP disabled)");
+    } else {
+        tracing::info!(%hub_udp_addr, %token, "Sent 16-byte UDP punch packet to hub");
+    }
     Ok(sock)
 }
 
@@ -177,6 +180,11 @@ pub async fn run_host_session(
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let (ws_cmd_tx, mut ws_cmd_rx) = tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
     let (relay_tx, _) = tokio::sync::broadcast::channel::<SocketAddr>(16);
+    let last_relay: Arc<std::sync::Mutex<Option<SocketAddr>>> = Arc::new(std::sync::Mutex::new(None));
+    let spawned_tokens: Arc<std::sync::Mutex<std::collections::HashSet<PunchToken>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    let active_peer_tokens: Arc<std::sync::Mutex<std::collections::HashSet<[u8; 16]>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
     let (ws_tunnel_out_tx, mut ws_tunnel_out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let (ws_tunnel_in_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(128);
 
@@ -185,9 +193,111 @@ pub async fn run_host_session(
     let udp_socket = punch_udp(config.hub_udp_addr, punch_token)
         .await
         .map_err(|e| format!("Failed to send UDP punch packet: {e}"))?;
-    let udp_socket = Arc::new(udp_socket);
+    let _udp_socket = Arc::new(udp_socket);
 
-    // 2. Send RegisterHost message immediately so room appears on hub without delay
+    // 2. Initialize Singleton UDP Loopback Proxy on 127.0.0.1:config.bind_port (5029)
+    let proxy_bind_port = if config.bind_port > 0 { config.bind_port } else { 5029 };
+    let host_proxy_sock = match UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], proxy_bind_port))).await {
+        Ok(s) => Arc::new(s),
+        Err(err)
+            if err.kind() == std::io::ErrorKind::AddrInUse || err.raw_os_error() == Some(98) =>
+        {
+            tracing::warn!(proxy_bind_port, %err, "Host singleton proxy port in use; falling back to ephemeral port");
+            log::warn!("Host singleton proxy port {} in use; falling back to ephemeral port: {}", proxy_bind_port, err);
+            Arc::new(UdpSocket::bind("127.0.0.1:0").await.map_err(|e| format!("Failed to bind ephemeral host proxy: {e}"))?)
+        }
+        Err(err) => return Err(format!("Failed to bind host loopback proxy on 127.0.0.1:{}: {}", proxy_bind_port, err)),
+    };
+    let bound_proxy_port = host_proxy_sock.local_addr().map(|a| a.port()).unwrap_or(proxy_bind_port);
+    tracing::info!(bound_proxy_port, "Singleton host UDP loopback proxy running on port 5029");
+    log::info!("Singleton host UDP loopback proxy running on port {}", bound_proxy_port);
+    if let Some(ref tx) = event_tx {
+        let _ = tx.send(RunnerEvent::ProxyBound { port: bound_proxy_port }).await;
+    }
+
+    // Spawn the singleton proxy forwarding loop
+    let proxy_game_sock = host_proxy_sock.clone();
+    let proxy_target_game = config.target_game_addr;
+    let proxy_ws_out_tx = ws_tunnel_out_tx.clone();
+    let mut proxy_ws_in_rx = ws_tunnel_in_tx.subscribe();
+    let host_tokens = active_peer_tokens.clone();
+    let default_punch_token = *punch_token.as_bytes();
+    let host_proxy_task = tokio::spawn(async move {
+        let mut game_buf = [0u8; 2048];
+        let mut last_game_addr = proxy_target_game;
+        loop {
+            tokio::select! {
+                recv_res = proxy_game_sock.recv_from(&mut game_buf) => {
+                    match recv_res {
+                        Ok((n, from)) => {
+                            if last_game_addr != Some(from) {
+                                last_game_addr = Some(from);
+                            }
+                            let targets: Vec<[u8; 16]> = {
+                                let set = host_tokens.lock().unwrap();
+                                if set.is_empty() {
+                                    vec![default_punch_token]
+                                } else {
+                                    set.iter().copied().collect()
+                                }
+                            };
+                            for token in targets {
+                                let mut framed = Vec::with_capacity(17 + n);
+                                framed.extend_from_slice(&token);
+                                framed.push(crate::loopback::MSG_TYPE_GAME_DATA);
+                                framed.extend_from_slice(&game_buf[..n]);
+                                if let Err(err) = proxy_ws_out_tx.send(framed) {
+                                    tracing::warn!(%err, "Singleton proxy: failed sending game datagram to WS tunnel");
+                                } else {
+                                    tracing::trace!(payload_len = n, "Singleton proxy: tunneled local game datagram via WebSocket");
+                                    log::debug!("Tunneled local game datagram ({} bytes with 17-byte header) via WebSocket", n);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            if err.raw_os_error() != Some(10054) {
+                                tracing::warn!(%err, "Singleton proxy: error reading from local game socket");
+                            }
+                        }
+                    }
+                }
+                ws_res = proxy_ws_in_rx.recv() => {
+                    match ws_res {
+                        Ok(pkt) => {
+                            if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_GAME_DATA {
+                                let mut tok = [0u8; 16];
+                                tok.copy_from_slice(&pkt[..16]);
+                                host_tokens.lock().unwrap().insert(tok);
+                            }
+                            let payload: &[u8] = if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_GAME_DATA {
+                                &pkt[17..]
+                            } else if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_KEEPALIVE {
+                                continue;
+                            } else {
+                                &pkt[..]
+                            };
+                            let dest_game = last_game_addr.unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 5030)));
+                            if let Err(err) = proxy_game_sock.send_to(payload, dest_game).await {
+                                tracing::warn!(%dest_game, %err, "Singleton proxy: failed delivering WS datagram to game");
+                            } else {
+                                tracing::trace!(%dest_game, payload_len = payload.len(), "Singleton proxy: delivered WS datagram to local game");
+                                log::debug!("Delivered WS tunnel datagram ({} bytes) to local game process at {}", payload.len(), dest_game);
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(skipped, "Singleton proxy: lagged behind on WS tunnel broadcast");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            tracing::info!("Singleton proxy: WS tunnel channel closed");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // 3. Send RegisterHost message immediately so room appears on hub without delay
     let host_udp_port = config
         .target_game_addr
         .map(|a| a.port())
@@ -211,7 +321,7 @@ pub async fn run_host_session(
         .await
         .map_err(|e| format!("Failed to send RegisterHost: {e}"))?;
 
-    // 3. Heartbeat task & active peer tracking
+    // 4. Heartbeat task & active peer tracking
     let active_peers = Arc::new(AtomicU32::new(0));
     let (hb_tx, mut hb_rx) = tokio::sync::mpsc::channel::<()>(1);
     let hb_task = tokio::spawn(async move {
@@ -231,7 +341,7 @@ pub async fn run_host_session(
         let _ = tx.send(RunnerEvent::Status("Host session registered. Waiting for Sonic R lobby (port 5029)...".to_string())).await;
     }
 
-    // 4. Initial lobby check with relaxed timeout (up to 3 minutes for slow-loading game windows)
+    // 5. Initial lobby check with relaxed timeout (up to 3 minutes for slow-loading game windows)
     let probe_sock = UdpSocket::bind("127.0.0.1:0")
         .await
         .map_err(|e| format!("Failed to bind UDP probe socket: {e}"))?;
@@ -356,38 +466,59 @@ pub async fn run_host_session(
                                 %punch_token,
                                 "Received PeerCandidate! Managing peer connection"
                             );
+                            active_peer_tokens.lock().unwrap().insert(*punch_token.as_bytes());
                             if let Some(ref tx) = event_tx {
                                 let _ = tx.send(RunnerEvent::PeerCandidateReceived { peer_addr, punch_token }).await;
                             }
-                            let socket_clone = udp_socket.clone();
-                            let cmd_tx_clone = ws_cmd_tx.clone();
-                            let relay_rx = relay_tx.subscribe();
-                            let bind_port = config.bind_port;
-                            let target_game_addr = config.target_game_addr;
-                            let sub_event_tx = event_tx.clone();
-                            let active_peers_clone = active_peers.clone();
-                            let ws_tunnel = crate::loopback::WsTunnelChannels {
-                                out_tx: ws_tunnel_out_tx.clone(),
-                                in_rx: ws_tunnel_in_tx.subscribe(),
-                            };
-                            tokio::spawn(async move {
-                                crate::punch::manage_peer_connection_with_events(
-                                    &socket_clone,
-                                    peer_addr,
-                                    punch_token,
-                                    cmd_tx_clone,
-                                    relay_rx,
-                                    bind_port,
-                                    target_game_addr,
-                                    sub_event_tx,
-                                    Some(active_peers_clone),
-                                    Some(ws_tunnel),
-                                ).await;
-                            });
+                            let should_spawn = spawned_tokens.lock().unwrap().insert(punch_token);
+                            if should_spawn {
+                                tracing::info!(%punch_token, %peer_addr, "Registering active peer token on host singleton session");
+                                let cmd_tx_clone = ws_cmd_tx.clone();
+                                let sub_event_tx = event_tx.clone();
+                                let active_peers_clone = active_peers.clone();
+                                tokio::spawn(async move {
+                                    let _guard = crate::punch::PeerCountGuard::new(Some(active_peers_clone), cmd_tx_clone.clone());
+                                    if let Some(ref tx) = sub_event_tx {
+                                        let _ = tx.send(RunnerEvent::TunnelEstablished {
+                                            peer_addr: SocketAddr::from(([127, 0, 0, 1], 9001)),
+                                            is_relay: true,
+                                        }).await;
+                                    }
+                                    let _ = cmd_tx_clone.send(proto::ClientMessage::RelayFallback { punch_token });
+                                    futures_util::future::pending::<()>().await;
+                                });
+                            } else {
+                                tracing::info!(%punch_token, "Peer connection already active for token; skipping duplicate candidate");
+                            }
                         }
                         HubMessage::UseRelay { punch_token, relay_addr } => {
                             tracing::info!(%punch_token, %relay_addr, "Received UseRelay from hub");
+                            *last_relay.lock().unwrap() = Some(relay_addr);
                             let _ = relay_tx.send(relay_addr);
+                            active_peer_tokens.lock().unwrap().insert(*punch_token.as_bytes());
+
+                            let should_spawn = spawned_tokens.lock().unwrap().insert(punch_token);
+                            if should_spawn {
+                                tracing::info!(
+                                    %punch_token,
+                                    %relay_addr,
+                                    "Registering active peer token from UseRelay on host singleton session"
+                                );
+                                let cmd_tx_clone = ws_cmd_tx.clone();
+                                let sub_event_tx = event_tx.clone();
+                                let active_peers_clone = active_peers.clone();
+                                tokio::spawn(async move {
+                                    let _guard = crate::punch::PeerCountGuard::new(Some(active_peers_clone), cmd_tx_clone.clone());
+                                    if let Some(ref tx) = sub_event_tx {
+                                        let _ = tx.send(RunnerEvent::TunnelEstablished {
+                                            peer_addr: relay_addr,
+                                            is_relay: true,
+                                        }).await;
+                                    }
+                                    let _ = cmd_tx_clone.send(proto::ClientMessage::RelayFallback { punch_token });
+                                    futures_util::future::pending::<()>().await;
+                                });
+                            }
                         }
                         HubMessage::Error { message } => {
                             tracing::error!(%message, "Received error from hub");
@@ -407,6 +538,7 @@ pub async fn run_host_session(
         }
     }
 
+    host_proxy_task.abort();
     hb_task.abort();
     if let Some(ref tx) = event_tx {
         let _ = tx.send(RunnerEvent::Stopped).await;
@@ -421,6 +553,101 @@ pub async fn run_join_session(
     event_tx: Option<tokio::sync::mpsc::Sender<RunnerEvent>>,
 ) -> Result<(), String> {
     crate::init_crypto_provider();
+
+    let punch_token = uuid::Uuid::new_v4();
+    let (ws_cmd_tx, mut ws_cmd_rx) = tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
+    let (ws_tunnel_out_tx, mut ws_tunnel_out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (ws_tunnel_in_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(128);
+    let spawned_tokens: Arc<std::sync::Mutex<std::collections::HashSet<PunchToken>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+
+    // 1. Initialize Singleton UDP Loopback Proxy on 127.0.0.1:config.bind_port (5029)
+    // and emit ProxyBound IMMEDIATELY so port 5029 is listening BEFORE game engine boots!
+    let proxy_bind_port = if config.bind_port > 0 { config.bind_port } else { 5029 };
+    let client_proxy_sock = match UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], proxy_bind_port))).await {
+        Ok(s) => Arc::new(s),
+        Err(err)
+            if err.kind() == std::io::ErrorKind::AddrInUse || err.raw_os_error() == Some(98) =>
+        {
+            tracing::warn!(proxy_bind_port, %err, "Client singleton proxy port in use; falling back to ephemeral port");
+            log::warn!("Client singleton proxy port {} in use; falling back to ephemeral port: {}", proxy_bind_port, err);
+            Arc::new(UdpSocket::bind("127.0.0.1:0").await.map_err(|e| format!("Failed to bind ephemeral client proxy: {e}"))?)
+        }
+        Err(err) => return Err(format!("Failed to bind client loopback proxy on 127.0.0.1:{}: {}", proxy_bind_port, err)),
+    };
+    let bound_proxy_port = client_proxy_sock.local_addr().map(|a| a.port()).unwrap_or(proxy_bind_port);
+    tracing::info!(bound_proxy_port, "Singleton client UDP loopback proxy running on port 5029");
+    log::info!("Singleton client UDP loopback proxy running on port {}", bound_proxy_port);
+    if let Some(ref tx) = event_tx {
+        let _ = tx.send(RunnerEvent::ProxyBound { port: bound_proxy_port }).await;
+    }
+
+    // 2. Spawn the client proxy forwarding loop immediately so early engine packets are buffered in ws_tunnel_out_tx!
+    let proxy_game_sock = client_proxy_sock.clone();
+    let proxy_target_game = config.target_game_addr;
+    let proxy_ws_out_tx = ws_tunnel_out_tx.clone();
+    let mut proxy_ws_in_rx = ws_tunnel_in_tx.subscribe();
+    let client_token_bytes = *punch_token.as_bytes();
+    let client_proxy_task = tokio::spawn(async move {
+        let mut game_buf = [0u8; 2048];
+        let mut last_game_addr = proxy_target_game;
+        loop {
+            tokio::select! {
+                recv_res = proxy_game_sock.recv_from(&mut game_buf) => {
+                    match recv_res {
+                        Ok((n, from)) => {
+                            if last_game_addr != Some(from) {
+                                last_game_addr = Some(from);
+                            }
+                            let mut framed = Vec::with_capacity(17 + n);
+                            framed.extend_from_slice(&client_token_bytes);
+                            framed.push(crate::loopback::MSG_TYPE_GAME_DATA);
+                            framed.extend_from_slice(&game_buf[..n]);
+                            if let Err(err) = proxy_ws_out_tx.send(framed) {
+                                tracing::warn!(%err, "Client proxy: failed sending game datagram to WS tunnel");
+                            } else {
+                                tracing::trace!(payload_len = n, "Client proxy: tunneled local game datagram via WebSocket");
+                                log::debug!("Tunneled local game datagram ({} bytes with 17-byte header) via WebSocket", n);
+                            }
+                        }
+                        Err(err) => {
+                            if err.raw_os_error() != Some(10054) {
+                                tracing::warn!(%err, "Client proxy: error reading from local game socket");
+                            }
+                        }
+                    }
+                }
+                ws_res = proxy_ws_in_rx.recv() => {
+                    match ws_res {
+                        Ok(pkt) => {
+                            let payload: &[u8] = if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_GAME_DATA {
+                                &pkt[17..]
+                            } else if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_KEEPALIVE {
+                                continue;
+                            } else {
+                                &pkt[..]
+                            };
+                            let dest_game = last_game_addr.unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 5031)));
+                            if let Err(err) = proxy_game_sock.send_to(payload, dest_game).await {
+                                tracing::warn!(%dest_game, %err, "Client proxy: failed delivering WS datagram to game");
+                            } else {
+                                tracing::trace!(%dest_game, payload_len = payload.len(), "Client proxy: delivered WS datagram to local game");
+                                log::debug!("Delivered WS tunnel datagram ({} bytes) to local game process at {}", payload.len(), dest_game);
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(skipped, "Client proxy: lagged behind on WS tunnel broadcast");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            tracing::info!("Client proxy: WS tunnel channel closed");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
     if let Some(ref tx) = event_tx {
         let _ = tx.send(RunnerEvent::Status(format!("Connecting to hub at {}...", config.hub_ws_url))).await;
     }
@@ -430,10 +657,6 @@ pub async fn run_join_session(
         .map_err(|e| format!("Failed to connect to hub WebSocket: {e}"))?;
 
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
-    let (ws_cmd_tx, mut ws_cmd_rx) = tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
-    let (relay_tx, _) = tokio::sync::broadcast::channel::<SocketAddr>(16);
-    let (ws_tunnel_out_tx, mut ws_tunnel_out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-    let (ws_tunnel_in_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(128);
 
     // Determine target server ID
     let target_server_id = match config.server_id {
@@ -450,20 +673,32 @@ pub async fn run_join_session(
 
             let mut found_id = None;
             while let Some(msg_res) = ws_rx.next().await {
-                if let Ok(Message::Text(t)) = msg_res {
-                    if let Ok(HubMessage::ServerList { servers }) = serde_json::from_str(&t) {
-                        if servers.is_empty() {
-                            return Err("No active servers currently registered on hub".to_string());
+                match msg_res {
+                    Ok(Message::Text(t)) => {
+                        if let Ok(HubMessage::ServerList { servers }) = serde_json::from_str(&t) {
+                            if servers.is_empty() {
+                                return Err("No active servers currently registered on hub".to_string());
+                            }
+                            println!("\nAvailable servers:");
+                            for (i, s) in servers.iter().enumerate() {
+                                println!("  [{}] {} (id: {}, players: {}/{})", i, s.name, s.id, s.players, s.max_players);
+                            }
+                            let selected = &servers[0];
+                            tracing::info!(selected_id = %selected.id, selected_name = %selected.name, "Automatically selecting first server");
+                            found_id = Some(selected.id);
+                            break;
                         }
-                        println!("\nAvailable servers:");
-                        for (i, s) in servers.iter().enumerate() {
-                            println!("  [{}] {} (id: {}, players: {}/{})", i, s.name, s.id, s.players, s.max_players);
-                        }
-                        let selected = &servers[0];
-                        tracing::info!(selected_id = %selected.id, selected_name = %selected.name, "Automatically selecting first server");
-                        found_id = Some(selected.id);
-                        break;
                     }
+                    Ok(Message::Binary(bin)) => {
+                        let _ = ws_tunnel_in_tx.send(bin);
+                    }
+                    Ok(Message::Close(_)) => {
+                        return Err("Hub closed connection prematurely while querying server list".to_string());
+                    }
+                    Err(e) => {
+                        return Err(format!("WebSocket error while querying server list: {e}"));
+                    }
+                    _ => {}
                 }
             }
 
@@ -474,12 +709,8 @@ pub async fn run_join_session(
         }
     };
 
-    // 1. Generate punch token and send UDP punch packet to hub
-    let punch_token = uuid::Uuid::new_v4();
-    let udp_socket = punch_udp(config.hub_udp_addr, punch_token)
-        .await
-        .map_err(|e| format!("Failed to send UDP punch packet: {e}"))?;
-    let udp_socket = Arc::new(udp_socket);
+    // 3. Send UDP punch packet to hub (best effort)
+    let _ = punch_udp(config.hub_udp_addr, punch_token).await;
 
     let join_udp_port = config
         .target_game_addr
@@ -488,7 +719,7 @@ pub async fn run_join_session(
         .or(if config.bind_port > 0 { Some(config.bind_port) } else { None })
         .unwrap_or(5029);
 
-    // 2. Send JoinRequest
+    // 4. Send JoinRequest
     let join_msg = ClientMessage::JoinRequest {
         server_id: target_server_id,
         punch_token,
@@ -506,7 +737,7 @@ pub async fn run_join_session(
         let _ = tx.send(RunnerEvent::Status("Sent JoinRequest, awaiting peer candidate...".to_string())).await;
     }
 
-    // 3. Loop: keep WS connection open, handle commands (RelayFallback), and dispatch PeerCandidate / UseRelay
+    // 5. Loop: keep WS connection open, tunnel datagrams, and handle signaling messages
     loop {
         tokio::select! {
             Some(cmd) = ws_cmd_rx.recv() => {
@@ -549,43 +780,38 @@ pub async fn run_join_session(
 
                 if let Ok(hub_msg) = serde_json::from_str::<HubMessage>(&text) {
                     match hub_msg {
-                        HubMessage::PeerCandidate { peer_addr, punch_token } => {
-                            tracing::info!(
-                                %peer_addr,
-                                %punch_token,
-                                "Received PeerCandidate! Managing peer connection"
-                            );
-                            if let Some(ref tx) = event_tx {
-                                let _ = tx.send(RunnerEvent::PeerCandidateReceived { peer_addr, punch_token }).await;
+                        HubMessage::PeerCandidate { peer_addr, punch_token: cand_token } => {
+                            let should_spawn = spawned_tokens.lock().unwrap().insert(cand_token);
+                            if should_spawn {
+                                tracing::info!(
+                                    %peer_addr,
+                                    %cand_token,
+                                    "Received PeerCandidate! Switching to single-port WebSocket tunnel"
+                                );
+                                if let Some(ref tx) = event_tx {
+                                    let _ = tx.send(RunnerEvent::PeerCandidateReceived { peer_addr, punch_token: cand_token }).await;
+                                    let _ = tx.send(RunnerEvent::TunnelEstablished {
+                                        peer_addr: SocketAddr::from(([127, 0, 0, 1], 9001)),
+                                        is_relay: true,
+                                    }).await;
+                                }
+                                let _ = ws_cmd_tx.send(ClientMessage::RelayFallback { punch_token: cand_token });
+                            } else {
+                                tracing::info!(%cand_token, "Peer connection already active for token; skipping duplicate candidate");
                             }
-                            let socket_clone = udp_socket.clone();
-                            let cmd_tx_clone = ws_cmd_tx.clone();
-                            let relay_rx = relay_tx.subscribe();
-                            let bind_port = config.bind_port;
-                            let target_game_addr = config.target_game_addr;
-                            let sub_event_tx = event_tx.clone();
-                            let ws_tunnel = crate::loopback::WsTunnelChannels {
-                                out_tx: ws_tunnel_out_tx.clone(),
-                                in_rx: ws_tunnel_in_tx.subscribe(),
-                            };
-                            tokio::spawn(async move {
-                                crate::punch::manage_peer_connection_with_events(
-                                    &socket_clone,
-                                    peer_addr,
-                                    punch_token,
-                                    cmd_tx_clone,
-                                    relay_rx,
-                                    bind_port,
-                                    target_game_addr,
-                                    sub_event_tx,
-                                    None,
-                                    Some(ws_tunnel),
-                                ).await;
-                            });
                         }
-                        HubMessage::UseRelay { punch_token, relay_addr } => {
-                            tracing::info!(%punch_token, %relay_addr, "Received UseRelay from hub");
-                            let _ = relay_tx.send(relay_addr);
+                        HubMessage::UseRelay { punch_token: relay_token, relay_addr } => {
+                            tracing::info!(%relay_token, %relay_addr, "Received UseRelay from hub");
+                            let should_spawn = spawned_tokens.lock().unwrap().insert(relay_token);
+                            if should_spawn {
+                                if let Some(ref tx) = event_tx {
+                                    let _ = tx.send(RunnerEvent::TunnelEstablished {
+                                        peer_addr: relay_addr,
+                                        is_relay: true,
+                                    }).await;
+                                }
+                                let _ = ws_cmd_tx.send(ClientMessage::RelayFallback { punch_token: relay_token });
+                            }
                         }
                         HubMessage::Error { message } => {
                             tracing::error!(%message, "Hub error during join session");
@@ -603,6 +829,7 @@ pub async fn run_join_session(
         }
     }
 
+    client_proxy_task.abort();
     if let Some(ref tx) = event_tx {
         let _ = tx.send(RunnerEvent::Stopped).await;
     }

@@ -428,7 +428,7 @@ dependencies = [
 
 [[package]]
 name = "proto"
-version = "0.1.0"
+version = "1.2.2"
 dependencies = [
  "serde",
  "uuid",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "sonicr_netplay"
-version = "0.1.0"
+version = "1.2.2"
 dependencies = [
  "android_logger",
  "futures-util",

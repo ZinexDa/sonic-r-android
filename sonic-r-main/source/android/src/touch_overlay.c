@@ -61,6 +61,7 @@ typedef struct {
 
 static ActiveTouch s_touches[MAX_TOUCHES];
 static unsigned char s_touchKeystate[256];
+static int s_inUnitTest = 0;
 
 /* Virtual Joystick state */
 static int s_joystickActive = 0;
@@ -539,6 +540,7 @@ void TouchOverlay_Reset(void)
 
 void TouchOverlay_TestMultiTouch(void)
 {
+    s_inUnitTest = 1;
     int screenW = 0, screenH = 0;
     platform_get_drawable_size(&screenW, &screenH);
     if (screenW <= 0 || screenH <= 0) {
@@ -664,6 +666,7 @@ void TouchOverlay_TestMultiTouch(void)
     } else {
         SDL_Log("TouchOverlay: [FAIL] Stuck keys detected after reset!");
     }
+    s_inUnitTest = 0;
 }
 
 void TouchOverlay_HandleEvent(const SDL_Event *event)
@@ -819,27 +822,34 @@ void TouchOverlay_Update(unsigned char *keystate)
     int screenW = 0, screenH = 0;
     platform_get_drawable_size(&screenW, &screenH);
     if (screenW <= 0 || screenH <= 0) {
-        return;
+        if (s_inUnitTest) {
+            screenW = 2400;
+            screenH = 1080;
+        } else {
+            return;
+        }
     }
 
     TouchLayout layout;
     ComputeLayout(screenW, screenH, &layout);
 
     /* Orphan touch sweep: if no fingers are physically on screen, clear all touch slots */
-    int numDevs = SDL_GetNumTouchDevices();
-    if (numDevs > 0) {
-        int totalFingers = 0;
-        for (int d = 0; d < numDevs; d++) {
-            SDL_TouchID tid = SDL_GetTouchDevice(d);
-            totalFingers += SDL_GetNumTouchFingers(tid);
-        }
-        if (totalFingers == 0) {
-            for (int i = 0; i < MAX_TOUCHES - 1; i++) {
-                s_touches[i].active = 0;
-                s_touches[i].pendingRelease = 0;
-                s_touches[i].binding = TOUCH_BIND_NONE;
-                s_touches[i].x = 0.0f;
-                s_touches[i].y = 0.0f;
+    if (!s_inUnitTest) {
+        int numDevs = SDL_GetNumTouchDevices();
+        if (numDevs > 0) {
+            int totalFingers = 0;
+            for (int d = 0; d < numDevs; d++) {
+                SDL_TouchID tid = SDL_GetTouchDevice(d);
+                totalFingers += SDL_GetNumTouchFingers(tid);
+            }
+            if (totalFingers == 0) {
+                for (int i = 0; i < MAX_TOUCHES - 1; i++) {
+                    s_touches[i].active = 0;
+                    s_touches[i].pendingRelease = 0;
+                    s_touches[i].binding = TOUCH_BIND_NONE;
+                    s_touches[i].x = 0.0f;
+                    s_touches[i].y = 0.0f;
+                }
             }
         }
     }

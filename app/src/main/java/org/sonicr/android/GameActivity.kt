@@ -62,16 +62,21 @@ class GameActivity : SDLActivity() {
         }
         val isHost = intent?.getBooleanExtra("IS_HOST", true) ?: true
         val port = intent?.getIntExtra("GAME_PORT", 5029) ?: 5029
+        val enginePort = if (isHost) 5030 else 5031
         val args = mutableListOf<String>()
         if (isHost) {
             args.add("-H")
+            args.add("-h")
+            args.add("127.0.0.1")
+            args.add("-p")
+            args.add("5030")
         } else {
             args.add("-J")
+            args.add("-h")
+            args.add("127.0.0.1")
+            args.add("-p")
+            args.add("5029")
         }
-        args.add("-h")
-        args.add("127.0.0.1")
-        args.add("-p")
-        args.add(port.toString())
         Log.i(TAG, "Passing SDL arguments for netplay: $args")
         return args.toTypedArray()
     }
@@ -107,23 +112,25 @@ class GameActivity : SDLActivity() {
         if (!isNetplay) return
         val isHost = intent?.getBooleanExtra("IS_HOST", true) ?: true
         val port = intent?.getIntExtra("GAME_PORT", 5029) ?: 5029
+        val enginePort = if (isHost) 5030 else 5031
         val hubUrl = intent?.getStringExtra("HUB_URL") ?: "127.0.0.1:8080"
         val roomName = intent?.getStringExtra("ROOM_NAME") ?: "Sonic Room"
         val roomId = intent?.getStringExtra("ROOM_ID")
 
         try {
-            nativeSetNetplayMode(true, isHost, "127.0.0.1", port)
+            val targetHostPort = if (isHost) 5030 else 5029
+            nativeSetNetplayMode(true, isHost, "127.0.0.1", targetHostPort)
 
             if (!isNetplayStarted) {
                 isNetplayStarted = true
-                Log.i(TAG, "Starting netplay session: isHost=$isHost, port=$port, hubUrl=$hubUrl, roomName=$roomName")
+                Log.i(TAG, "Starting netplay session: isHost=$isHost, enginePort=$enginePort, hubUrl=$hubUrl, roomName=$roomName, roomId=$roomId")
                 val initRes = NetplayBridge.init()
                 Log.i(TAG, "NetplayBridge.init() returned $initRes")
 
                 val startRes = if (isHost) {
-                    NetplayBridge.startHost(hubUrl, roomName, port)
+                    NetplayBridge.startHost(hubUrl, roomName, enginePort)
                 } else {
-                    NetplayBridge.startJoin(hubUrl, roomId, port)
+                    NetplayBridge.startJoin(hubUrl, roomId, enginePort)
                 }
                 Log.i(TAG, "NetplayBridge session started (res=$startRes, isHost=$isHost)")
             }
