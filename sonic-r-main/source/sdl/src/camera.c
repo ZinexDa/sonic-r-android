@@ -197,6 +197,7 @@ void BuildChaseCamera(Player *player, CamStateEntry *camStruct)
      * These get overwritten by the rendering pipeline (BuildCameraView). */
     camStruct->camDist = 0x300;
     camStruct->camHeight = 0;
+    camStruct->fovDetail = 0x20;
 }
 
 #ifdef SONICR_DC

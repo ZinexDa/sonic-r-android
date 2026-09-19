@@ -923,7 +923,7 @@ void SendNetworkHostData(void)
         if (s_hostSlotLastRecvMs[i] == 0) continue;
 
         DWORD silent = now - s_hostSlotLastRecvMs[i];
-        if (silent > 5000) {
+        if (silent > 15000) {
             DebugLog("Player %d disconnected (silent %ums)\n", i, (unsigned)silent);
             g_playerBase[i].netConnected = 0;
             g_playerBase[i].netActive = 0;
@@ -1129,8 +1129,8 @@ void WaitForNetworkData(void)
     int from_slot;
     int gotData = 0;
 
-    /* Timeout: 60s on first frame, 5s thereafter — binary: WaitForSingleObject */
-    DWORD timeout = (g_netSyncEstablished == 0) ? 60000 : 5000;
+    /* Timeout: 60s on first frame, 15s thereafter — binary: WaitForSingleObject */
+    DWORD timeout = (g_netSyncEstablished == 0) ? 60000 : 15000;
     DWORD deadline = timeGetTime() + timeout;
 
     /* Poll for game data broadcast (0xFF0000F0, 16 bytes) from host */
@@ -2167,7 +2167,7 @@ void ApplyNetworkPlayerState(void)
         && g_introCountdown == 0) {
         DWORD now    = timeGetTime();
         DWORD silent = now - s_lastHostPacketMs;
-        if (silent > 5000 && g_netDisconnectFlag == 0) {
+        if (silent > 15000 && g_netDisconnectFlag == 0) {
             DebugLog("Host disconnected (silent for %ums) — exiting race\n",
                      (unsigned)silent);
             g_netDisconnectFlag = 1;

@@ -699,12 +699,12 @@ void InitRaceStart(void)
     /* g_camStateTable is the smoothedCam used by RenderScene3D's camera
      * interpolation; initializing it here seeds the smoothing with the correct
      * starting camera position so the flyover transition doesn't snap. */
-    BuildChaseCamera(g_playerBase, &g_camStateTable[0]);
-    /* BuildChaseCamera → ComputeLookAtAngles writes yaw as a short at
-     * camState+0x14, which corrupts the low 16 bits of camState[5].
-     * The smoothing divisor reads camState[5] >> 16, so set the high
-     * 16 bits to the default detail level (0x20 → divisor = 8). */
-    g_camStateTable[0].fovDetail = 0x20;
+    for (int c = 0; c < 4; c++) {
+        BuildChaseCamera(&g_playerBase[c], &g_camStateTable[c]);
+        g_camStateTable[c].fovDetail = 0x20;
+        g_camStateTable[c].camDist = 0x300;
+        g_camStateTable[c].camHeight = 0;
+    }
 
     InitRaceState();
 }

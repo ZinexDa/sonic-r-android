@@ -557,7 +557,7 @@ void BuildCameraView(Player *player, CamStateEntry *cameraParams,
     target16 = camX << 4;                           /* shl edx, 4 */
     diff = smoothedCam->posX - target16;            /* sub eax, edx */
     divisor = smoothedCam->fovDetail >> 2;           /* sar 0x10; sar 2 = >> 18 */
-    if (divisor == 0) {
+    if (divisor <= 0) {
         divisor = 1;
     }
     /* idiv: signed divide diff by divisor */
@@ -568,7 +568,7 @@ void BuildCameraView(Player *player, CamStateEntry *cameraParams,
     target16 = camY << 4;
     diff = smoothedCam->posY - target16;
     divisor = smoothedCam->fovDetail >> 1;           /* sar 0x10; sar 1 = >> 17 */
-    if (divisor == 0) {
+    if (divisor <= 0) {
         divisor = 1;
     }
     step = diff / divisor;
@@ -578,7 +578,7 @@ void BuildCameraView(Player *player, CamStateEntry *cameraParams,
     target16 = camZ << 4;
     diff = smoothedCam->posZ - target16;
     divisor = smoothedCam->fovDetail >> 2;           /* sar 0x10; sar 2 = >> 18 */
-    if (divisor == 0) {
+    if (divisor <= 0) {
         divisor = 1;
     }
     step = diff / divisor;
