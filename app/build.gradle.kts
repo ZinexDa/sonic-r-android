@@ -12,8 +12,8 @@ android {
         applicationId = "org.sonicr.android"
         minSdk = 21
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.2"
+        versionCode = 5
+        versionName = "1.2.1"
 
         externalNativeBuild {
             cmake {
@@ -23,8 +23,12 @@ android {
                     "-DSDL_STATIC=OFF",
                     "-DSDL_TEST=OFF"
                 )
-                abiFilters("arm64-v8a", "x86_64")
+                abiFilters("arm64-v8a", "x86_64", "armeabi-v7a")
             }
+        }
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64", "armeabi-v7a")
         }
     }
 

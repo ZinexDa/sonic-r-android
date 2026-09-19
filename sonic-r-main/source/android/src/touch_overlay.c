@@ -724,8 +724,26 @@ void TouchOverlay_HandleEvent(const SDL_Event *event)
         case SDL_FINGERUP: {
             SDL_FingerID fid = event->tfinger.fingerId;
             for (int i = 0; i < MAX_TOUCHES - 1; i++) {
-                if (s_touches[i].active && s_touches[i].id == fid) {
-                    s_touches[i].pendingRelease = 1;
+                if ((s_touches[i].active || s_touches[i].pendingRelease) && s_touches[i].id == fid) {
+                    if (s_touches[i].binding == TOUCH_BIND_JOYSTICK) {
+                        /* Immediately retire stick touches upon release, eliminating latency */
+                        s_touches[i].active = 0;
+                        s_touches[i].pendingRelease = 0;
+                        s_touches[i].binding = TOUCH_BIND_NONE;
+                        s_touches[i].x = 0.0f;
+                        s_touches[i].y = 0.0f;
+                        s_joystickActive = 0;
+                        s_joystickKnobX = 0.0f;
+                        s_joystickKnobY = 0.0f;
+                        s_joystickAngle = 0.0f;
+                        s_joystickMagnitude = 0.0f;
+                        s_pressed.up = 0;
+                        s_pressed.down = 0;
+                        s_pressed.left = 0;
+                        s_pressed.right = 0;
+                    } else {
+                        s_touches[i].pendingRelease = 1;
+                    }
                     break;
                 }
             }
@@ -769,7 +787,24 @@ void TouchOverlay_HandleEvent(const SDL_Event *event)
         case SDL_MOUSEBUTTONUP: {
             int slot = MAX_TOUCHES - 1;
             if (s_touches[slot].id == (SDL_FingerID)-100) {
-                s_touches[slot].pendingRelease = 1;
+                if (s_touches[slot].binding == TOUCH_BIND_JOYSTICK) {
+                    s_touches[slot].active = 0;
+                    s_touches[slot].pendingRelease = 0;
+                    s_touches[slot].binding = TOUCH_BIND_NONE;
+                    s_touches[slot].x = 0.0f;
+                    s_touches[slot].y = 0.0f;
+                    s_joystickActive = 0;
+                    s_joystickKnobX = 0.0f;
+                    s_joystickKnobY = 0.0f;
+                    s_joystickAngle = 0.0f;
+                    s_joystickMagnitude = 0.0f;
+                    s_pressed.up = 0;
+                    s_pressed.down = 0;
+                    s_pressed.left = 0;
+                    s_pressed.right = 0;
+                } else {
+                    s_touches[slot].pendingRelease = 1;
+                }
             }
             break;
         }
@@ -790,6 +825,25 @@ void TouchOverlay_Update(unsigned char *keystate)
     TouchLayout layout;
     ComputeLayout(screenW, screenH, &layout);
 
+    /* Orphan touch sweep: if no fingers are physically on screen, clear all touch slots */
+    int numDevs = SDL_GetNumTouchDevices();
+    if (numDevs > 0) {
+        int totalFingers = 0;
+        for (int d = 0; d < numDevs; d++) {
+            SDL_TouchID tid = SDL_GetTouchDevice(d);
+            totalFingers += SDL_GetNumTouchFingers(tid);
+        }
+        if (totalFingers == 0) {
+            for (int i = 0; i < MAX_TOUCHES - 1; i++) {
+                s_touches[i].active = 0;
+                s_touches[i].pendingRelease = 0;
+                s_touches[i].binding = TOUCH_BIND_NONE;
+                s_touches[i].x = 0.0f;
+                s_touches[i].y = 0.0f;
+            }
+        }
+    }
+
     TouchButtonState prev = s_pressed;
     memset(&s_pressed, 0, sizeof(s_pressed));
     s_joystickActive = 0;
@@ -797,6 +851,13 @@ void TouchOverlay_Update(unsigned char *keystate)
     /* Process all active/pending touches strictly by their bound control */
     for (int i = 0; i < MAX_TOUCHES; i++) {
         if (!s_touches[i].active && !s_touches[i].pendingRelease) continue;
+
+        if (s_touches[i].binding == TOUCH_BIND_JOYSTICK && s_touches[i].pendingRelease) {
+            s_touches[i].active = 0;
+            s_touches[i].pendingRelease = 0;
+            s_touches[i].binding = TOUCH_BIND_NONE;
+            continue;
+        }
 
         float px = s_touches[i].x * (float)screenW;
         float py = s_touches[i].y * (float)screenH;
@@ -835,6 +896,9 @@ void TouchOverlay_Update(unsigned char *keystate)
                         s_pressed.right = 1;
                     }
                     s_joystickAngle = angle;
+                } else {
+                    /* Within deadzone: exact neutral center (0 deflection) */
+                    s_joystickAngle = 0.0f;
                 }
 
                 /* Visual knob position clamped to base travel radius */
@@ -913,11 +977,16 @@ void TouchOverlay_Update(unsigned char *keystate)
         }
     }
 
-    /* Reset knob to center if joystick is not touched */
+    /* Reset knob and axes to center if joystick is not touched */
     if (!s_joystickActive) {
         s_joystickKnobX = layout.dpad_cx;
         s_joystickKnobY = layout.dpad_cy;
         s_joystickMagnitude = 0.0f;
+        s_joystickAngle = 0.0f;
+        s_pressed.up = 0;
+        s_pressed.down = 0;
+        s_pressed.left = 0;
+        s_pressed.right = 0;
     }
 
     /* Log changes for debugging */

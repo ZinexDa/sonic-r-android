@@ -150,6 +150,15 @@ static int gamepad_open(int deviceIndex)
     if (id < 0) {
         return 0;
     }
+
+    const char *chkName = SDL_IsGameController(deviceIndex)
+                          ? SDL_GameControllerNameForIndex(deviceIndex)
+                          : SDL_JoystickNameForIndex(deviceIndex);
+    if (chkName && (SDL_strcasestr(chkName, "accelerometer") || SDL_strcasestr(chkName, "sensor"))) {
+        SDL_Log("gamepad_open: ignoring sensor device '%s'", chkName);
+        return 0;
+    }
+
     for (int i = 0; i < s_padCount; i++) {
         if (s_pads[i].id == id) {
             /* Upgrade raw joystick to game controller if mapping now available */
@@ -195,6 +204,11 @@ static int gamepad_open(int deviceIndex)
             pad.nButtons = JOY_BUTTONS_PER_SLOT;
         }
         name = SDL_JoystickName(pad.joy);
+        if (name && (SDL_strcasestr(name, "accelerometer") || SDL_strcasestr(name, "sensor"))) {
+            SDL_Log("gamepad_open: closing accelerometer joystick '%s'", name);
+            SDL_JoystickClose(pad.joy);
+            return 0;
+        }
     }
 
     int s = s_padCount;
@@ -340,6 +354,7 @@ int platform_init(int width, int height, int fullscreen, const char *title)
 
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
