@@ -387,8 +387,14 @@ int LoadGameSettings(void)
         g_stereoEnabled = buf[20];
         g_vocalsEnabled = buf[21];
         g_optSfxVolume = buf[22];
-        if (g_optSfxVolume <= 1 && SFX_GetMasterVolume() > 0.001f) {
-            /* Fix legacy INF files that defaulted SFX volume to 1 (4.4% volume) */
+        if (g_optSfxVolume < 0) {
+            g_optSfxVolume = 0;
+        }
+        if (g_optSfxVolume > 8) {
+            g_optSfxVolume = 8;
+        }
+        if (g_optSfxVolume == 1 && SFX_GetMasterVolume() > 0.001f) {
+            /* Fix legacy 1997 INF files that used slot 22 as a 0/1 boolean flag */
             g_optSfxVolume = 8;
         }
         /* Slot 23 carries the 0-8 Music Volume slider. The 1997 layout used it
@@ -401,8 +407,8 @@ int LoadGameSettings(void)
         if (g_optMusicVolume > 8) {
             g_optMusicVolume = 8;
         }
-        if (g_optMusicVolume < 8 && Music_GetMasterVolume() > 0.001f) {
-            /* Allow full range for master volume slider */
+        if (g_optMusicVolume == 1 && Music_GetMasterVolume() > 0.001f) {
+            /* Fix legacy 1997 INF files that used slot 23 as a 0/1 boolean flag */
             g_optMusicVolume = 8;
         }
         g_musicEnabled = (g_optMusicVolume != 0);

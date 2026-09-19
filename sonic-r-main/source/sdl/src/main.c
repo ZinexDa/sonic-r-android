@@ -1056,14 +1056,17 @@ network_screen_entry:
             printf("[NET_DEBUG] NetworkScreen exited with code: %d, g_isNetworkGame=%d\n", screenResult, g_isNetworkGame);
             fflush(stdout);
             if (screenResult == SCREEN_TITLE) {
+                CloseDirectPlaySession();
                 StopCD();
                 goto title_sequence;
             }
 network_result_dispatch:                                   /* 0x4ce767: network result dispatch (also reached from post-race) */
             if (screenResult == SCREEN_QUIT) {
+                CloseDirectPlaySession();
                 return 0;
             }
             if (screenResult == SCREEN_BACK) {                   /* 0x4CE77A: test eax; je 0x4CE4FA */
+                CloseDirectPlaySession();
                 printf("[NET_DEBUG] Network dispatch: SCREEN_BACK, returning to main_menu_loop\n");
                 fflush(stdout);
                 goto main_menu_loop;              /* back to main dispatch */

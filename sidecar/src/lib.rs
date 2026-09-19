@@ -19,9 +19,10 @@ pub fn init_logging() {
         use android_logger::Config;
         android_logger::init_once(
             Config::default()
-                .with_max_level(log::LevelFilter::Info)
+                .with_max_level(log::LevelFilter::Debug)
                 .with_tag("SonicRNetplay"),
         );
+        log::info!("SonicRNetplay: native android logger initialized");
     }
     #[cfg(not(target_os = "android"))]
     {
@@ -134,3 +135,18 @@ pub async fn resolve_hub_addr_async(raw: &str) -> (String, SocketAddr) {
 
     (ws_url, udp_addr)
 }
+
+pub async fn fetch_room_list_async(raw_hub_url: &str) -> Result<String, String> {
+    let (ws_url, _) = extract_hub_parts(raw_hub_url);
+    let servers = runner::fetch_server_list(&ws_url).await?;
+    serde_json::to_string(&servers).map_err(|e| format!("Failed to serialize server list: {e}"))
+}
+
+pub fn fetch_room_list(raw_hub_url: &str) -> Result<String, String> {
+    let rt = get_or_create_runtime()?;
+    let url = raw_hub_url.to_string();
+    rt.block_on(async move {
+        fetch_room_list_async(&url).await
+    })
+}
+

@@ -160,4 +160,7 @@ int platform_get_region(void);
 unsigned int platform_menu_buttons(void);
 #endif
 
+/* Returns current network lobby state (>0 if inside multiplayer lobby, 0 otherwise) */
+int Engine_GetLobbyState(void);
+
 #endif /* PLATFORM_H */

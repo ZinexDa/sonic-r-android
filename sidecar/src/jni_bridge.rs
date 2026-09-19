@@ -1,5 +1,5 @@
 use jni::objects::{JClass, JString};
-use jni::sys::jint;
+use jni::sys::{jint, jstring};
 use jni::JNIEnv;
 use std::ffi::CString;
 
@@ -72,3 +72,40 @@ pub extern "system" fn Java_org_sonicr_android_NetplayBridge_nativeStop(
 ) {
     crate::ffi::netplay_stop();
 }
+
+#[no_mangle]
+pub extern "system" fn Java_org_sonicr_android_NetplayBridge_nativeFetchRoomList(
+    mut env: JNIEnv,
+    _class: JClass,
+    j_hub_url: JString,
+) -> jstring {
+    let hub_url = match env.get_string(&j_hub_url) {
+        Ok(s) => s.to_str().unwrap_or("").to_string(),
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    match crate::fetch_room_list(&hub_url) {
+        Ok(json_str) => match env.new_string(json_str) {
+            Ok(js) => js.into_raw(),
+            Err(e) => {
+                tracing::error!("Failed to allocate JNI string: {e}");
+                std::ptr::null_mut()
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to fetch room list: {e}");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_sonicr_android_NetplayBridge_fetchRoomList(
+    env: JNIEnv,
+    class: JClass,
+    j_hub_url: JString,
+) -> jstring {
+    Java_org_sonicr_android_NetplayBridge_nativeFetchRoomList(env, class, j_hub_url)
+}
+
+

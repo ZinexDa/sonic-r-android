@@ -53,6 +53,7 @@ endforeach()
 
 # Add Android-specific platform, rendering, and touch overlay implementations
 list(APPEND SONICR_SOURCES
+    "${SONICR_SDL_DIR}/src/fileio.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/platform_android.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/r_gles_backend.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/touch_overlay.c"

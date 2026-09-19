@@ -211,9 +211,19 @@ object AssetInstaller {
                 }
             }
 
+            ensureDirectoriesExist(context)
             InstallResult.Success(filesCopied, totalBytesCopied)
         } catch (e: Exception) {
             InstallResult.Failure(e.localizedMessage ?: e.toString())
         }
+    }
+
+    /**
+     * Ensures writable save, ghost, and demo directories exist in app storage.
+     */
+    fun ensureDirectoriesExist(context: Context) {
+        File(context.filesDir, "SAVE").mkdirs()
+        File(context.filesDir, "GHOST").mkdirs()
+        File(context.filesDir, "DEMOS").mkdirs()
     }
 }

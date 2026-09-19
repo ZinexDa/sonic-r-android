@@ -158,6 +158,25 @@ static int gamepad_open(int deviceIndex)
     }
     for (int i = 0; i < s_padCount; i++) {
         if (s_pads[i].id == id) {
+            /* If device was previously opened as raw joystick but now has a controller mapping, upgrade it */
+            if (!s_pads[i].ctrl && SDL_IsGameController(deviceIndex)) {
+                SDL_GameController *ctrl = SDL_GameControllerOpen(deviceIndex);
+                if (ctrl) {
+                    if (s_pads[i].joy) {
+                        SDL_JoystickClose(s_pads[i].joy);
+                        s_pads[i].joy = NULL;
+                    }
+                    s_pads[i].ctrl = ctrl;
+                    s_pads[i].nButtons = GC_BUTTON_COUNT;
+                    const char *cname = SDL_GameControllerName(ctrl);
+                    platform_publish_joystick_name(i, cname);
+                    g_joystickDeviceFlags[i] = (short)(s_pads[i].nButtons < JOY_SLOT_CFG_WORDS
+                                                       ? s_pads[i].nButtons : JOY_SLOT_CFG_WORDS);
+                    fprintf(stderr, "Gamepad slot %d upgraded to GameController: %s (%d buttons)\n",
+                            i, cname ? cname : "unnamed", s_pads[i].nButtons);
+                    return 1;
+                }
+            }
             return 0;
         }
     }
@@ -219,6 +238,31 @@ static void gamepad_close(int slot)
     s_pads[slot].joy      = NULL;
     s_pads[slot].id       = -1;
     s_pads[slot].nButtons = 0;
+}
+
+static void gamepad_remove_by_id(SDL_JoystickID jid)
+{
+    for (int i = 0; i < s_padCount; i++) {
+        if (s_pads[i].id != jid) {
+            continue;
+        }
+        fprintf(stderr, "Gamepad slot %d removed (ID %d)\n", i, (int)jid);
+        gamepad_close(i);
+        /* Clear pressed state for removed slot */
+        memset(&g_keyPressState[i * JOY_BUTTONS_PER_SLOT], 0, JOY_BUTTONS_PER_SLOT);
+        /* Shift remaining slots down */
+        for (int j = i; j < s_padCount - 1; j++) {
+            s_pads[j] = s_pads[j + 1];
+        }
+        s_pads[s_padCount - 1].ctrl     = NULL;
+        s_pads[s_padCount - 1].joy      = NULL;
+        s_pads[s_padCount - 1].id       = -1;
+        s_pads[s_padCount - 1].nButtons = 0;
+        s_padCount--;
+        g_initFeatureC = s_padCount;
+        SyncJoystickSlots();
+        break;
+    }
 }
 
 /* =====================================================================
@@ -425,6 +469,41 @@ static unsigned char SDLScancodeToDIK(SDL_Scancode sc)
 }
 
 /* =====================================================================
+ * Game Controller DB Mapping Loader
+ * ===================================================================== */
+static void LoadGameControllerMappings(void)
+{
+    static int s_mappingsLoaded = 0;
+    if (s_mappingsLoaded) {
+        return;
+    }
+    int total = 0;
+    const char *base = platform_base_path();
+    if (base && *base) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/gamecontrollerdb.txt", base);
+        int n = SDL_GameControllerAddMappingsFromFile(path);
+        if (n > 0) {
+            fprintf(stderr, "Loaded %d controller mappings from %s\n", n, path);
+            total += n;
+        }
+    }
+    int n = SDL_GameControllerAddMappingsFromFile("gamecontrollerdb.txt");
+    if (n > 0) {
+        fprintf(stderr, "Loaded %d controller mappings from gamecontrollerdb.txt\n", n);
+        total += n;
+    }
+    if (total == 0) {
+        n = SDL_GameControllerAddMappingsFromFile("../gamecontrollerdb.txt");
+        if (n > 0) {
+            fprintf(stderr, "Loaded %d controller mappings from ../gamecontrollerdb.txt\n", n);
+            total += n;
+        }
+    }
+    s_mappingsLoaded = 1;
+}
+
+/* =====================================================================
  * Platform API implementation
  * ===================================================================== */
 
@@ -448,6 +527,10 @@ int platform_init(int width, int height, int fullscreen, const char *title)
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return -1;
     }
+    if (!SDL_WasInit(SDL_INIT_GAMECONTROLLER)) {
+        SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+    }
+    LoadGameControllerMappings();
     SDL_StopTextInput();  /* disable macOS IME composition overlay */
 
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
@@ -574,12 +657,18 @@ static void HandleSDLEvent(SDL_Event *event)
             break;
         }
 
-        /* Hotplug is handled on the JOY events, not the CONTROLLER ones, even
-         * for mapped pads. SDL emits CONTROLLERDEVICEADDED *in addition to*
-         * JOYDEVICEADDED for a device it has a mapping for — not instead of it —
-         * so watching only the joystick pair covers every device through one
-         * path and cannot double-open a controller. gamepad_open() decides which
-         * API to drive it with. */
+        case SDL_CONTROLLERDEVICEADDED: {
+            if (gamepad_open(event->cdevice.which)) {
+                SyncJoystickSlots();
+            }
+            break;
+        }
+
+        case SDL_CONTROLLERDEVICEREMOVED: {
+            gamepad_remove_by_id(event->cdevice.which);
+            break;
+        }
+
         case SDL_JOYDEVICEADDED: {
             if (gamepad_open(event->jdevice.which)) {
                 SyncJoystickSlots();
@@ -588,27 +677,7 @@ static void HandleSDLEvent(SDL_Event *event)
         }
 
         case SDL_JOYDEVICEREMOVED: {
-            /* ADDED carries a device index, REMOVED an instance id. */
-            SDL_JoystickID jid = event->jdevice.which;
-            for (int i = 0; i < s_padCount; i++) {
-                if (s_pads[i].id != jid) {
-                    continue;
-                }
-                gamepad_close(i);
-                /* Clear pressed state for removed slot */
-                memset(&g_keyPressState[i * JOY_BUTTONS_PER_SLOT], 0,
-                    JOY_BUTTONS_PER_SLOT);
-                /* Shift remaining slots down */
-                for (int j = i; j < s_padCount - 1; j++) {
-                    s_pads[j] = s_pads[j + 1];
-                }
-                s_pads[s_padCount - 1].ctrl     = NULL;
-                s_pads[s_padCount - 1].joy      = NULL;
-                s_pads[s_padCount - 1].id       = -1;
-                s_pads[s_padCount - 1].nButtons = 0;
-                s_padCount--;
-                break;
-            }
+            gamepad_remove_by_id(event->jdevice.which);
             break;
         }
 
@@ -666,17 +735,19 @@ void platform_pump_events(void)
  * Analog deadzone: 0.6 (digital threshold).
  * ===================================================================== */
 
-#define STICK_DEADZONE_I 19660  /* 0.6 * 32767 */
+#define STICK_DEADZONE_I 8192   /* 0.25 * 32767: responsive steering without stick drift */
 #define JOY_CFG_MAX      32     /* g_joystickConfigWords array size */
 
 int platform_init_gamepads(void)
 {
+    LoadGameControllerMappings();
     /* Open anything already connected at startup. Hotplug arrivals go through
      * the same gamepad_open() from the JOYDEVICEADDED handler. */
     int n = SDL_NumJoysticks();
     for (int i = 0; i < n && s_padCount < MAX_GAMEPADS; i++) {
         gamepad_open(i);
     }
+    SyncJoystickSlots();
     return s_padCount;
 }
 
@@ -755,14 +826,12 @@ int platform_poll_gamepads(unsigned short *joySlotState, int maxSlots)
         if (haveStick) {
             if (lx < -STICK_DEADZONE_I) {
                 bits |= PAD_LEFT;
-            }
-            if (lx > STICK_DEADZONE_I) {
+            } else if (lx > STICK_DEADZONE_I) {
                 bits |= PAD_RIGHT;
             }
             if (ly < -STICK_DEADZONE_I) {
                 bits |= PAD_UP;
-            }
-            if (ly > STICK_DEADZONE_I) {
+            } else if (ly > STICK_DEADZONE_I) {
                 bits |= PAD_DOWN;
             }
         }
@@ -779,13 +848,12 @@ int platform_poll_gamepads(unsigned short *joySlotState, int maxSlots)
             if (!held) {
                 continue;
             }
-            short cfg;
+            short cfg = 0;
             if (b < JOY_SLOT_CFG_WORDS) {
                 cfg = slotCfg[b];
-            } else if (b < JOY_CFG_MAX) {
+            }
+            if (cfg == 0 && b < JOY_CFG_MAX) {
                 cfg = g_joystickConfigWords[b];
-            } else {
-                cfg = 0;
             }
             if (pad->joy) {
                 /* Raw device: directions came from the hat/stick above, and this

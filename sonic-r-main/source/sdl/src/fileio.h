@@ -27,7 +27,8 @@ int    sr_fError(FILE *file);
 #define fWrite(buffer, elementSize, elementCount, file) sr_fWrite((buffer), (elementSize), (elementCount), (file))
 #define fError(file)                                    sr_fError(file)
 #else
-#define fOpen(path, mode)                               fopen(path, mode)
+FILE  *sr_fOpen(const char *path, const char *mode);
+#define fOpen(path, mode)                               sr_fOpen((path), (mode))
 #define fRead(buffer, elementSize, elementCount, file)  fread(buffer, elementSize, elementCount, file)
 #define fSeek(file, offset, whence)                     fseek(file, offset, whence)
 #define fTell(file)                                     ftell(file)

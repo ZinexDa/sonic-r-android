@@ -4876,11 +4876,24 @@ static void NetSynthPadReset(void) { }
 static void NetSynthPadKeys(void) { }
 #endif
 
+int g_inNetworkLobby = 0;
+
+int Engine_GetLobbyState(void)
+{
+    if (g_inNetworkLobby) {
+        return ns_lobbyState;
+    }
+    return 0;
+}
+
 int NetworkScreen(void)
 {
+    g_inNetworkLobby = 1;
+
     /* Bring up the network stack (deferred from boot on DC). */
     if (platform_net_init() < 0) {
         DebugLog("NetworkScreen: platform_net_init failed\n");
+        g_inNetworkLobby = 0;
         return SCREEN_BACK;
     }
 
@@ -6168,6 +6181,7 @@ render_frame:
     }
 
 exit_network_screen:
+    g_inNetworkLobby = 0;
     ns_lobbyState = 0;
     g_netSavedCharId = (int)(signed short)g_menuPlayer.charId;
     g_netSavedTrackIdx = localTrackIdx;
@@ -6179,6 +6193,11 @@ exit_network_screen:
     }
     UpnpClosePort(NET_PORT_DEFAULT);
     MatchmakerClearSession();
+    if (g_screenResult != 1) {
+        printf("[NET_DEBUG] NetworkScreen: non-race exit (%d), closing session & stopping sidecar\n", g_screenResult);
+        fflush(stdout);
+        CloseDirectPlaySession();
+    }
     printf("[NET_DEBUG] NetworkScreen exiting with code %d\n", g_screenResult);
     fflush(stdout);
     return g_screenResult;
@@ -6200,6 +6219,7 @@ exit_network_screen:
  */
 int NetworkScreenReentry(void)
 {
+    g_inNetworkLobby = 1;
     /* ROM table: per-character Y offset for nameplate rendering.
      * 10 entries indexed by charId. DGROUP at 0x501898. */
     static const int s_netCharModelY[10] = {
@@ -6866,6 +6886,7 @@ render_frame_re:
     }
 
 exit_network_screen_re:
+    g_inNetworkLobby = 0;
     ns_lobbyState = 0;
     g_netSavedCharId = (int)(signed short)g_menuPlayer.charId;
     g_netSavedTrackIdx = localTrackIdx;
@@ -6880,6 +6901,11 @@ exit_network_screen_re:
     }
     UpnpClosePort(NET_PORT_DEFAULT);
     MatchmakerClearSession();
+    if (g_screenResult != 1) {
+        printf("[NET_DEBUG] NetworkScreenReentry: non-race exit (%d), closing session & stopping sidecar\n", g_screenResult);
+        fflush(stdout);
+        CloseDirectPlaySession();
+    }
     printf("[NET_DEBUG] NetworkScreenReentry exiting with code %d\n", g_screenResult);
     fflush(stdout);
     return g_screenResult;

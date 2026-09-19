@@ -6,6 +6,13 @@ pub const MSG_TYPE_KEEPALIVE: u8 = 0x00;
 pub const MSG_TYPE_GAME_DATA: u8 = 0x01;
 pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Channels for tunneling game datagrams over an active WebSocket connection.
+#[derive(Debug)]
+pub struct WsTunnelChannels {
+    pub out_tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    pub in_rx: tokio::sync::broadcast::Receiver<Vec<u8>>,
+}
+
 /// Runs the local UDP loopback proxy by binding to `127.0.0.1:<bind_port>`
 /// and executing `run_tunnel_session_with_socket`.
 ///
@@ -49,13 +56,42 @@ pub async fn run_tunnel_session_with_events(
     relay_rx: tokio::sync::broadcast::Receiver<SocketAddr>,
     event_tx: Option<tokio::sync::mpsc::Sender<crate::runner::RunnerEvent>>,
 ) -> Result<(), std::io::Error> {
+    run_tunnel_session_with_events_and_ws(
+        tunnel_sock,
+        target_addr,
+        punch_token,
+        bind_port,
+        target_game_addr,
+        is_relay,
+        direct_punch_success,
+        relay_rx,
+        event_tx,
+        None,
+    )
+    .await
+}
+
+/// Runs the local UDP loopback proxy with optional runner event notifications and WebSocket tunnel channels.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_tunnel_session_with_events_and_ws(
+    tunnel_sock: &UdpSocket,
+    target_addr: SocketAddr,
+    punch_token: PunchToken,
+    bind_port: u16,
+    target_game_addr: Option<SocketAddr>,
+    is_relay: bool,
+    direct_punch_success: bool,
+    relay_rx: tokio::sync::broadcast::Receiver<SocketAddr>,
+    event_tx: Option<tokio::sync::mpsc::Sender<crate::runner::RunnerEvent>>,
+    ws_tunnel: Option<WsTunnelChannels>,
+) -> Result<(), std::io::Error> {
     let local_game_bind = SocketAddr::from(([127, 0, 0, 1], bind_port));
     let game_sock = UdpSocket::bind(local_game_bind).await?;
     let bound_port = game_sock.local_addr()?.port();
     if let Some(ref tx) = event_tx {
         let _ = tx.send(crate::runner::RunnerEvent::ProxyBound { port: bound_port }).await;
     }
-    run_tunnel_session_with_socket(
+    run_tunnel_session_full(
         tunnel_sock,
         target_addr,
         punch_token,
@@ -64,6 +100,7 @@ pub async fn run_tunnel_session_with_events(
         is_relay,
         direct_punch_success,
         relay_rx,
+        ws_tunnel,
     )
     .await
 }
@@ -86,6 +123,32 @@ pub async fn run_tunnel_session_with_events(
 #[allow(clippy::too_many_arguments)]
 pub async fn run_tunnel_session_with_socket(
     tunnel_sock: &UdpSocket,
+    target_addr: SocketAddr,
+    punch_token: PunchToken,
+    game_sock: UdpSocket,
+    initial_game_addr: Option<SocketAddr>,
+    is_relay: bool,
+    direct_punch_success: bool,
+    relay_rx: tokio::sync::broadcast::Receiver<SocketAddr>,
+) -> Result<(), std::io::Error> {
+    run_tunnel_session_full(
+        tunnel_sock,
+        target_addr,
+        punch_token,
+        game_sock,
+        initial_game_addr,
+        is_relay,
+        direct_punch_success,
+        relay_rx,
+        None,
+    )
+    .await
+}
+
+/// Runs the local UDP loopback proxy with optional WebSocket tunneling support.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_tunnel_session_full(
+    tunnel_sock: &UdpSocket,
     mut target_addr: SocketAddr,
     punch_token: PunchToken,
     game_sock: UdpSocket,
@@ -93,6 +156,7 @@ pub async fn run_tunnel_session_with_socket(
     mut is_relay: bool,
     direct_punch_success: bool,
     mut relay_rx: tokio::sync::broadcast::Receiver<SocketAddr>,
+    mut ws_tunnel: Option<WsTunnelChannels>,
 ) -> Result<(), std::io::Error> {
     let bound_game_addr = game_sock.local_addr()?;
     tracing::info!(
@@ -102,6 +166,7 @@ pub async fn run_tunnel_session_with_socket(
         %punch_token,
         is_relay,
         direct_punch_success,
+        has_ws_tunnel = ws_tunnel.is_some(),
         "Local UDP loopback proxy running"
     );
 
@@ -120,7 +185,20 @@ pub async fn run_tunnel_session_with_socket(
     ping_pkt[17..21].copy_from_slice(b"PING");
 
     let mut keepalive_timer = tokio::time::interval(KEEPALIVE_INTERVAL);
-    // Skip immediate tick
+    // If starting in relay mode, immediately register endpoint with relay
+    if is_relay {
+        if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
+            if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
+                tracing::warn!(%target_addr, %err, "Failed sending initial tunnel keepalive to relay");
+            } else {
+                tracing::debug!(%target_addr, is_relay, "Sent initial tunnel keepalive to relay");
+            }
+        }
+        if let Some(ref ws) = ws_tunnel {
+            let _ = ws.out_tx.send(ping_pkt.to_vec());
+        }
+    }
+    // Skip immediate tick of the interval timer
     keepalive_timer.tick().await;
 
     loop {
@@ -140,10 +218,22 @@ pub async fn run_tunnel_session_with_socket(
                         }
 
                         out_pkt[17..17 + n].copy_from_slice(&game_buf[..n]);
-                        if let Err(err) = tunnel_sock.send_to(&out_pkt[..17 + n], target_addr).await {
-                            tracing::warn!(%target_addr, %err, "Failed to send game datagram over tunnel");
-                        } else {
-                            tracing::trace!(%target_addr, payload_len = n, "Forwarded game datagram to tunnel");
+                        let full_pkt = &out_pkt[..17 + n];
+
+                        // Forward to UDP target unless target is loopback when WS tunnel is available
+                        if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
+                            if let Err(err) = tunnel_sock.send_to(full_pkt, target_addr).await {
+                                tracing::warn!(%target_addr, %err, "Failed to send game datagram over tunnel");
+                            } else {
+                                tracing::trace!(%target_addr, payload_len = n, "Forwarded game datagram to tunnel");
+                            }
+                        }
+
+                        // Also send via WebSocket tunnel if in relay mode or target is loopback
+                        if is_relay || target_addr.ip().is_loopback() {
+                            if let Some(ref ws) = ws_tunnel {
+                                let _ = ws.out_tx.send(full_pkt.to_vec());
+                            }
                         }
                     }
                     Err(err) => {
@@ -171,16 +261,49 @@ pub async fn run_tunnel_session_with_socket(
                         }
 
                         // Validate source address:
-                        // In relay mode, packets must come from relay_addr (or same IP).
+                        // In relay mode, packets must come from relay_addr (or same IP / loopback).
                         // In direct P2P mode, packets must come from peer's confirmed IP.
-                        if from.ip() != target_addr.ip() {
-                            tracing::warn!(
-                                expected_ip = %target_addr.ip(),
-                                actual_ip = %from.ip(),
-                                %from,
-                                "Ignoring tunnel packet: token matched but source IP does not match expected peer/relay IP"
-                            );
-                            continue;
+                        if is_relay {
+                            if from.ip() != target_addr.ip()
+                                && !from.ip().is_loopback()
+                                && !target_addr.ip().is_loopback()
+                            {
+                                tracing::warn!(
+                                    expected_ip = %target_addr.ip(),
+                                    actual_ip = %from.ip(),
+                                    %from,
+                                    "Ignoring tunnel packet: token matched but source IP does not match expected relay IP"
+                                );
+                                continue;
+                            }
+                            if from != target_addr {
+                                tracing::info!(
+                                    old_relay = %target_addr,
+                                    actual_relay = %from,
+                                    "Updated relay target address to confirmed source address"
+                                );
+                                target_addr = from;
+                            }
+                        } else {
+                            if from.ip() != target_addr.ip()
+                                && !(from.ip().is_loopback() && target_addr.ip().is_loopback())
+                            {
+                                tracing::warn!(
+                                    expected_ip = %target_addr.ip(),
+                                    actual_ip = %from.ip(),
+                                    %from,
+                                    "Ignoring tunnel packet: token matched but source IP does not match expected peer IP"
+                                );
+                                continue;
+                            }
+                            if from.port() != target_addr.port() {
+                                tracing::info!(
+                                    old_peer = %target_addr,
+                                    actual_peer = %from,
+                                    "Updated peer target port from confirmed packet"
+                                );
+                                target_addr = from;
+                            }
                         }
 
                         let msg_type = tunnel_buf[16];
@@ -190,7 +313,11 @@ pub async fn run_tunnel_session_with_socket(
                             }
                             MSG_TYPE_GAME_DATA => {
                                 let payload = &tunnel_buf[17..n];
-                                if let Some(game_addr) = last_game_addr {
+                                let dest_game_addr = last_game_addr.or(initial_game_addr);
+                                if let Some(game_addr) = dest_game_addr {
+                                    if last_game_addr.is_none() {
+                                        last_game_addr = Some(game_addr);
+                                    }
                                     if let Err(err) = game_sock.send_to(payload, game_addr).await {
                                         tracing::warn!(%game_addr, %err, "Failed delivering game datagram to local game process");
                                     } else {
@@ -218,16 +345,63 @@ pub async fn run_tunnel_session_with_socket(
                 }
             }
 
-            // 3. Periodic tunnel keepalive
-            _ = keepalive_timer.tick() => {
-                if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
-                    tracing::warn!(%target_addr, %err, "Failed sending tunnel keepalive");
+            // 3. Inbound from WebSocket tunnel -> demux keepalive vs game data -> forward to game process
+            ws_pkt_res = async {
+                if let Some(ref mut ws) = ws_tunnel {
+                    ws.in_rx.recv().await
                 } else {
-                    tracing::debug!(%target_addr, is_relay, "Sent tunnel keepalive");
+                    std::future::pending().await
+                }
+            } => {
+                if let Ok(pkt) = ws_pkt_res {
+                    if pkt.len() >= 17 && &pkt[..16] == token_bytes {
+                        let msg_type = pkt[16];
+                        match msg_type {
+                            MSG_TYPE_KEEPALIVE => {
+                                tracing::debug!(len = pkt.len() - 17, "Received WS tunnel keepalive");
+                            }
+                            MSG_TYPE_GAME_DATA => {
+                                let payload = &pkt[17..];
+                                let dest_game_addr = last_game_addr.or(initial_game_addr);
+                                if let Some(game_addr) = dest_game_addr {
+                                    if last_game_addr.is_none() {
+                                        last_game_addr = Some(game_addr);
+                                    }
+                                    if let Err(err) = game_sock.send_to(payload, game_addr).await {
+                                        tracing::warn!(%game_addr, %err, "Failed delivering WS tunnel datagram to local game process");
+                                    } else {
+                                        tracing::trace!(%game_addr, payload_len = payload.len(), "Delivered WS tunnel datagram to local game process");
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        payload_len = payload.len(),
+                                        "Dropping incoming WS tunnel datagram: no local game process has sent packets yet to learn destination port"
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
 
-            // 4. Dynamic relay switch from hub
+            // 4. Periodic tunnel keepalive
+            _ = keepalive_timer.tick() => {
+                if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
+                    if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
+                        tracing::warn!(%target_addr, %err, "Failed sending tunnel keepalive");
+                    } else {
+                        tracing::debug!(%target_addr, is_relay, "Sent tunnel keepalive");
+                    }
+                }
+                if is_relay || target_addr.ip().is_loopback() {
+                    if let Some(ref ws) = ws_tunnel {
+                        let _ = ws.out_tx.send(ping_pkt.to_vec());
+                    }
+                }
+            }
+
+            // 5. Dynamic relay switch from hub
             relay_res = relay_rx.recv() => {
                 if let Ok(new_relay_addr) = relay_res {
                     if direct_punch_success {
@@ -243,6 +417,16 @@ pub async fn run_tunnel_session_with_socket(
                         );
                         target_addr = new_relay_addr;
                         is_relay = true;
+                        if !target_addr.ip().is_loopback() || ws_tunnel.is_none() {
+                            if let Err(err) = tunnel_sock.send_to(&ping_pkt, target_addr).await {
+                                tracing::warn!(%target_addr, %err, "Failed sending immediate keepalive to relay");
+                            } else {
+                                tracing::debug!(%target_addr, "Sent immediate keepalive to relay");
+                            }
+                        }
+                        if let Some(ref ws) = ws_tunnel {
+                            let _ = ws.out_tx.send(ping_pkt.to_vec());
+                        }
                     }
                 }
             }

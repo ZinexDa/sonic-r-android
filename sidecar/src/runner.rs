@@ -67,23 +67,43 @@ pub const NET_DISCOVER_REPLY: u32 = 0x534F4E48; // "SONH"
 /// Probes the local Sonic R game process to verify it has bound its UDP socket in the lobby.
 pub async fn probe_game_lobby(probe_sock: &UdpSocket, target_addr: SocketAddr) -> bool {
     let msg = NET_DISCOVER_MAGIC.to_le_bytes();
-    if probe_sock.send_to(&msg, target_addr).await.is_err() {
-        return false;
+
+    // Drain any stale error state or unread packet on Windows
+    let mut drain_buf = [0u8; 64];
+    while let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(1), probe_sock.recv_from(&mut drain_buf)).await {}
+
+    if let Err(err) = probe_sock.send_to(&msg, target_addr).await {
+        if err.raw_os_error() == Some(10054) {
+            // Windows WSAECONNRESET from prior ICMP port unreachable; retry once
+            if probe_sock.send_to(&msg, target_addr).await.is_err() {
+                return false;
+            }
+        } else {
+            return false;
+        }
     }
 
     let mut buf = [0u8; 16];
-    let sleep_fut = tokio::time::sleep(Duration::from_millis(150));
+    let sleep_fut = tokio::time::sleep(Duration::from_millis(300));
     tokio::pin!(sleep_fut);
 
-    tokio::select! {
-        _ = &mut sleep_fut => false,
-        recv_res = probe_sock.recv_from(&mut buf) => {
-            match recv_res {
-                Ok((n, from)) if from.port() == target_addr.port() && n >= 4 => {
-                    let reply = u32::from_le_bytes(buf[..4].try_into().unwrap());
-                    reply == NET_DISCOVER_REPLY
+    loop {
+        tokio::select! {
+            _ = &mut sleep_fut => return false,
+            recv_res = probe_sock.recv_from(&mut buf) => {
+                match recv_res {
+                    Ok((n, from)) if from.port() == target_addr.port() && n >= 4 => {
+                        let reply = u32::from_le_bytes(buf[..4].try_into().unwrap());
+                        return reply == NET_DISCOVER_REPLY;
+                    }
+                    Ok(_) => continue,
+                    Err(err) => {
+                        if err.raw_os_error() == Some(10054) {
+                            return false;
+                        }
+                        return false;
+                    }
                 }
-                _ => false,
             }
         }
     }
@@ -157,6 +177,8 @@ pub async fn run_host_session(
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let (ws_cmd_tx, mut ws_cmd_rx) = tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
     let (relay_tx, _) = tokio::sync::broadcast::channel::<SocketAddr>(16);
+    let (ws_tunnel_out_tx, mut ws_tunnel_out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (ws_tunnel_in_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(128);
 
     // 1. Generate punch token and send UDP punch packet to hub
     let punch_token = uuid::Uuid::new_v4();
@@ -165,47 +187,19 @@ pub async fn run_host_session(
         .map_err(|e| format!("Failed to send UDP punch packet: {e}"))?;
     let udp_socket = Arc::new(udp_socket);
 
-    // 2. If target_game_addr is specified, wait for the local game to open its lobby
-    let probe_sock = UdpSocket::bind("127.0.0.1:0")
-        .await
-        .map_err(|e| format!("Failed to bind UDP probe socket: {e}"))?;
+    // 2. Send RegisterHost message immediately so room appears on hub without delay
+    let host_udp_port = config
+        .target_game_addr
+        .map(|a| a.port())
+        .filter(|&p| p > 0)
+        .or(if config.bind_port > 0 { Some(config.bind_port) } else { None })
+        .unwrap_or(5029);
 
-    if let Some(target_game_addr) = config.target_game_addr {
-        if let Some(ref tx) = event_tx {
-            let _ = tx
-                .send(RunnerEvent::Status("Waiting for Sonic R host lobby to open...".to_string()))
-                .await;
-        }
-
-        let wait_start = std::time::Instant::now();
-        let timeout = Duration::from_secs(60);
-        let mut ready = false;
-
-        while wait_start.elapsed() < timeout {
-            if probe_game_lobby(&probe_sock, target_game_addr).await {
-                ready = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-
-        if !ready {
-            return Err("Timed out waiting for Sonic R to enter host lobby (port not active)".to_string());
-        }
-
-        if let Some(ref tx) = event_tx {
-            let _ = tx
-                .send(RunnerEvent::Status("Host lobby active! Registering room with hub...".to_string()))
-                .await;
-        }
-    }
-
-    // 3. Send RegisterHost message
     let register_msg = ClientMessage::RegisterHost {
         name: config.name.clone(),
         max_players: 4,
         game_version: "0.1.0".to_string(),
-        udp_port: None,
+        udp_port: Some(host_udp_port),
         punch_token,
     };
 
@@ -217,7 +211,7 @@ pub async fn run_host_session(
         .await
         .map_err(|e| format!("Failed to send RegisterHost: {e}"))?;
 
-    // 4. Heartbeat task & active peer tracking
+    // 3. Heartbeat task & active peer tracking
     let active_peers = Arc::new(AtomicU32::new(0));
     let (hb_tx, mut hb_rx) = tokio::sync::mpsc::channel::<()>(1);
     let hb_task = tokio::spawn(async move {
@@ -234,11 +228,37 @@ pub async fn run_host_session(
     });
 
     if let Some(ref tx) = event_tx {
+        let _ = tx.send(RunnerEvent::Status("Host session registered. Waiting for Sonic R lobby (port 5029)...".to_string())).await;
+    }
+
+    // 4. Initial lobby check with relaxed timeout (up to 3 minutes for slow-loading game windows)
+    let probe_sock = UdpSocket::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Failed to bind UDP probe socket: {e}"))?;
+
+    let mut game_lobby_active = false;
+    if let Some(target_game_addr) = config.target_game_addr {
+        if probe_game_lobby(&probe_sock, target_game_addr).await {
+            game_lobby_active = true;
+            if let Some(ref tx) = event_tx {
+                let _ = tx
+                    .send(RunnerEvent::Status("Sonic R host lobby active on port 5029! Ready for players.".to_string()))
+                    .await;
+            }
+        } else {
+            tracing::info!(%target_game_addr, "Host session registered on hub; awaiting Sonic R lobby on port 5029");
+            if let Some(ref tx) = event_tx {
+                let _ = tx
+                    .send(RunnerEvent::Status("Host room active on hub. Waiting for Sonic R on port 5029...".to_string()))
+                    .await;
+            }
+        }
+    } else if let Some(ref tx) = event_tx {
         let _ = tx.send(RunnerEvent::Status("Registered host, awaiting players...".to_string())).await;
     }
 
     // 5. Message loop with game lobby liveness monitor
-    let mut liveness_interval = tokio::time::interval(Duration::from_secs(2));
+    let mut liveness_interval = tokio::time::interval(Duration::from_secs(3));
     liveness_interval.tick().await; // skip immediate tick
     let mut failed_probes = 0;
 
@@ -248,10 +268,20 @@ pub async fn run_host_session(
                 if let Some(target_game_addr) = config.target_game_addr {
                     if probe_game_lobby(&probe_sock, target_game_addr).await {
                         failed_probes = 0;
-                    } else {
+                        if !game_lobby_active {
+                            game_lobby_active = true;
+                            tracing::info!(%target_game_addr, "Sonic R host lobby detected active!");
+                            if let Some(ref tx) = event_tx {
+                                let _ = tx.send(RunnerEvent::Status("Sonic R host lobby active on port 5029! Ready for players.".to_string())).await;
+                            }
+                        }
+                    } else if game_lobby_active {
                         failed_probes += 1;
-                        if failed_probes >= 3 {
-                            tracing::info!(%target_game_addr, "Local game process left lobby or closed socket; terminating host session");
+                        if failed_probes >= 30 {
+                            tracing::warn!(%target_game_addr, "Sonic R lobby closed or unresponsive; ending host session");
+                            if let Some(ref tx) = event_tx {
+                                let _ = tx.send(RunnerEvent::Status("Sonic R closed; shutting down host session.".to_string())).await;
+                            }
                             break;
                         }
                     }
@@ -265,12 +295,21 @@ pub async fn run_host_session(
                     }
                 }
             }
+            Some(bin) = ws_tunnel_out_rx.recv() => {
+                if let Err(err) = ws_tx.send(Message::Binary(bin)).await {
+                    tracing::warn!(%err, "Failed to send binary packet to hub WS");
+                    break;
+                }
+            }
             Some(()) = hb_rx.recv() => {
-                let count = (1 + active_peers.load(Ordering::Relaxed)) as u8;
-                let hb_msg = ClientMessage::Heartbeat { players: Some(count), status: None };
-                if let Ok(text) = serde_json::to_string(&hb_msg) {
+                let count = active_peers.load(Ordering::Relaxed) as u8;
+                let hb = ClientMessage::Heartbeat {
+                    players: Some(1 + count),
+                    status: None,
+                };
+                if let Ok(text) = serde_json::to_string(&hb) {
                     if let Err(err) = ws_tx.send(Message::Text(text)).await {
-                        tracing::warn!(%err, "Failed to send heartbeat; connection may be closed");
+                        tracing::warn!(%err, "Failed to send heartbeat to hub WS");
                         break;
                     }
                     tracing::debug!(count, "Sent heartbeat to hub");
@@ -292,6 +331,10 @@ pub async fn run_host_session(
 
                 let text = match msg {
                     Message::Text(t) => t,
+                    Message::Binary(bin) => {
+                        let _ = ws_tunnel_in_tx.send(bin);
+                        continue;
+                    }
                     Message::Close(_) => {
                         tracing::info!("Hub closed WebSocket connection");
                         break;
@@ -323,6 +366,10 @@ pub async fn run_host_session(
                             let target_game_addr = config.target_game_addr;
                             let sub_event_tx = event_tx.clone();
                             let active_peers_clone = active_peers.clone();
+                            let ws_tunnel = crate::loopback::WsTunnelChannels {
+                                out_tx: ws_tunnel_out_tx.clone(),
+                                in_rx: ws_tunnel_in_tx.subscribe(),
+                            };
                             tokio::spawn(async move {
                                 crate::punch::manage_peer_connection_with_events(
                                     &socket_clone,
@@ -334,6 +381,7 @@ pub async fn run_host_session(
                                     target_game_addr,
                                     sub_event_tx,
                                     Some(active_peers_clone),
+                                    Some(ws_tunnel),
                                 ).await;
                             });
                         }
@@ -384,6 +432,8 @@ pub async fn run_join_session(
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let (ws_cmd_tx, mut ws_cmd_rx) = tokio::sync::mpsc::unbounded_channel::<ClientMessage>();
     let (relay_tx, _) = tokio::sync::broadcast::channel::<SocketAddr>(16);
+    let (ws_tunnel_out_tx, mut ws_tunnel_out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    let (ws_tunnel_in_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(128);
 
     // Determine target server ID
     let target_server_id = match config.server_id {
@@ -431,10 +481,18 @@ pub async fn run_join_session(
         .map_err(|e| format!("Failed to send UDP punch packet: {e}"))?;
     let udp_socket = Arc::new(udp_socket);
 
+    let join_udp_port = config
+        .target_game_addr
+        .map(|a| a.port())
+        .filter(|&p| p > 0)
+        .or(if config.bind_port > 0 { Some(config.bind_port) } else { None })
+        .unwrap_or(5029);
+
     // 2. Send JoinRequest
     let join_msg = ClientMessage::JoinRequest {
         server_id: target_server_id,
         punch_token,
+        udp_port: Some(join_udp_port),
     };
     let text = serde_json::to_string(&join_msg)
         .map_err(|e| format!("Failed to serialize JoinRequest: {e}"))?;
@@ -459,6 +517,12 @@ pub async fn run_join_session(
                     }
                 }
             }
+            Some(bin) = ws_tunnel_out_rx.recv() => {
+                if let Err(err) = ws_tx.send(Message::Binary(bin)).await {
+                    tracing::warn!(%err, "Failed to send binary packet to hub WS");
+                    break;
+                }
+            }
             msg_opt = ws_rx.next() => {
                 let Some(msg_res) = msg_opt else {
                     tracing::info!("Hub disconnected");
@@ -475,6 +539,10 @@ pub async fn run_join_session(
 
                 let text = match msg {
                     Message::Text(t) => t,
+                    Message::Binary(bin) => {
+                        let _ = ws_tunnel_in_tx.send(bin);
+                        continue;
+                    }
                     Message::Close(_) => break,
                     _ => continue,
                 };
@@ -496,6 +564,10 @@ pub async fn run_join_session(
                             let bind_port = config.bind_port;
                             let target_game_addr = config.target_game_addr;
                             let sub_event_tx = event_tx.clone();
+                            let ws_tunnel = crate::loopback::WsTunnelChannels {
+                                out_tx: ws_tunnel_out_tx.clone(),
+                                in_rx: ws_tunnel_in_tx.subscribe(),
+                            };
                             tokio::spawn(async move {
                                 crate::punch::manage_peer_connection_with_events(
                                     &socket_clone,
@@ -507,6 +579,7 @@ pub async fn run_join_session(
                                     target_game_addr,
                                     sub_event_tx,
                                     None,
+                                    Some(ws_tunnel),
                                 ).await;
                             });
                         }

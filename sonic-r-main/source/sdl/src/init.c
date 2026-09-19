@@ -843,10 +843,9 @@ void InitJoystickConfig(void)
     g_joystickConfigWords[GCBTN_X]             = PAD_ACCEL;  /* Accel — as on DC */
     g_joystickConfigWords[GCBTN_Y]             = PAD_CAMERA; /* Camera (3 height/zoom levels) */
     g_joystickConfigWords[GCBTN_START]         = PAD_START;  /* Start / Pause */
+    g_joystickConfigWords[GCBTN_BACK]          = PAD_START;  /* Back / Select doubles as Start/Pause */
     g_joystickConfigWords[GCBTN_LEFTSHOULDER]  = PAD_DRIFTL; /* L.BRAKE */
-    /* Left unbound: GCBTN_BACK (PAD_ACCEL is already the cancel bit on B, and
-     * binding it here would make Back accelerate mid-race), GCBTN_GUIDE, and
-     * both stick clicks. */
+    /* Left unbound: GCBTN_GUIDE and both stick clicks. */
 
     /* Shared across all four slots — past the per-slot config's capacity. */
     g_joystickConfigWords[GCBTN_RIGHTSHOULDER] = PAD_DRIFTR; /* R.BRAKE */

@@ -31,6 +31,17 @@ int netplay_start_join(const char *hub_url, const char *room_id, uint16_t game_p
  */
 void netplay_stop(void);
 
+/**
+ * Query the signaling hub for online rooms and return JSON string.
+ * Must be freed with netplay_free_string(). Returns NULL on error.
+ */
+char *netplay_fetch_room_list(const char *hub_url);
+
+/**
+ * Free string returned by netplay_fetch_room_list().
+ */
+void netplay_free_string(char *ptr);
+
 #ifdef __cplusplus
 }
 #endif

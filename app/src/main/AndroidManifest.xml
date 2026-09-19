@@ -55,12 +55,12 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
 
-        <!-- Multiplayer Stub Screen -->
+        <!-- Multiplayer Screen -->
         <activity
             android:name=".MultiplayerActivity"
             android:label="@string/title_multiplayer"
             android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|keyboard"
-            android:exported="false"
+            android:exported="true"
             android:screenOrientation="sensorLandscape"
             android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
 

@@ -64,6 +64,7 @@ class LauncherActivity : Activity() {
     private fun updateAssetStatusUI() {
         val installed = AssetInstaller.isAssetsInstalled(this)
         if (installed) {
+            AssetInstaller.ensureDirectoriesExist(this)
             binding.assetStatusBadge.setText(R.string.asset_status_ready)
             binding.assetStatusBadge.setTextColor(Color.parseColor("#4ADE80"))
             binding.btnPlay.setText(R.string.btn_play)

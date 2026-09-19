@@ -44,6 +44,9 @@ pub extern "C" fn netplay_start_host(
     room_name: *const c_char,
     game_port: u16,
 ) -> c_int {
+    crate::init_crypto_provider();
+    crate::init_logging();
+
     let hub_str = match unsafe { c_str_to_string(hub_url) } {
         Some(s) if !s.is_empty() => s,
         _ => {
@@ -69,12 +72,14 @@ pub extern "C" fn netplay_start_host(
     // Stop any previously running session
     crate::stop_active_session();
 
+    log::info!("netplay_start_host: hub={}, name={}, port={}", hub_str, name, port);
     tracing::info!(hub = %hub_str, name = %name, port, "Starting netplay host session");
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<RunnerEvent>(64);
 
     let task = rt.spawn(async move {
         let (hub_ws_url, hub_udp_addr) = crate::resolve_hub_addr_async(&hub_str).await;
+        log::info!("Host task: resolved ws={}, udp={:?}", hub_ws_url, hub_udp_addr);
         let config = HostConfig {
             hub_ws_url,
             hub_udp_addr,
@@ -85,18 +90,22 @@ pub extern "C" fn netplay_start_host(
 
         tokio::spawn(async move {
             while let Some(ev) = event_rx.recv().await {
+                log::info!("Host RunnerEvent: {:?}", ev);
                 tracing::info!(?ev, "Host RunnerEvent");
             }
         });
 
         if let Err(err) = crate::runner::run_host_session(config, Some(event_tx)).await {
+            log::error!("Host session ended with error: {}", err);
             tracing::error!(%err, "Host session ended with error");
         } else {
+            log::info!("Host session completed cleanly");
             tracing::info!("Host session completed cleanly");
         }
     });
 
     if let Err(err) = crate::set_active_task(task) {
+        log::error!("Failed to register active host task: {}", err);
         tracing::error!(%err, "Failed to register active host task");
         return -2;
     }
@@ -116,6 +125,9 @@ pub extern "C" fn netplay_start_join(
     room_id: *const c_char,
     game_port: u16,
 ) -> c_int {
+    crate::init_crypto_provider();
+    crate::init_logging();
+
     let hub_str = match unsafe { c_str_to_string(hub_url) } {
         Some(s) if !s.is_empty() => s,
         _ => {
@@ -148,12 +160,14 @@ pub extern "C" fn netplay_start_join(
     // Stop any previously running session
     crate::stop_active_session();
 
+    log::info!("netplay_start_join: hub={}, server_id={:?}, port={}", hub_str, server_id, bind_port);
     tracing::info!(hub = %hub_str, ?server_id, bind_port, "Starting netplay join session");
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<RunnerEvent>(64);
 
     let task = rt.spawn(async move {
         let (hub_ws_url, hub_udp_addr) = crate::resolve_hub_addr_async(&hub_str).await;
+        log::info!("Join task: resolved ws={}, udp={:?}", hub_ws_url, hub_udp_addr);
         let config = JoinConfig {
             hub_ws_url,
             hub_udp_addr,
@@ -164,18 +178,22 @@ pub extern "C" fn netplay_start_join(
 
         tokio::spawn(async move {
             while let Some(ev) = event_rx.recv().await {
+                log::info!("Join RunnerEvent: {:?}", ev);
                 tracing::info!(?ev, "Join RunnerEvent");
             }
         });
 
         if let Err(err) = crate::runner::run_join_session(config, Some(event_tx)).await {
+            log::error!("Join session ended with error: {}", err);
             tracing::error!(%err, "Join session ended with error");
         } else {
+            log::info!("Join session completed cleanly");
             tracing::info!("Join session completed cleanly");
         }
     });
 
     if let Err(err) = crate::set_active_task(task) {
+        log::error!("Failed to register active join task: {}", err);
         tracing::error!(%err, "Failed to register active join task");
         return -3;
     }
@@ -190,3 +208,36 @@ pub extern "C" fn netplay_stop() {
     tracing::info!("Stopping active netplay session...");
     crate::stop_active_session();
 }
+
+/// Query the signaling hub for online rooms and return JSON string.
+/// Returns null on error or empty hub URL.
+/// The caller MUST free the returned string using `netplay_free_string`.
+#[no_mangle]
+pub extern "C" fn netplay_fetch_room_list(hub_url: *const c_char) -> *mut c_char {
+    let hub_str = match unsafe { c_str_to_string(hub_url) } {
+        Some(s) if !s.is_empty() => s,
+        _ => return std::ptr::null_mut(),
+    };
+
+    match crate::fetch_room_list(&hub_str) {
+        Ok(json) => match std::ffi::CString::new(json) {
+            Ok(c_str) => c_str.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        },
+        Err(err) => {
+            tracing::error!(%err, "netplay_fetch_room_list failed");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Free a string returned by `netplay_fetch_room_list`.
+#[no_mangle]
+pub extern "C" fn netplay_free_string(ptr: *mut c_char) {
+    if !ptr.is_null() {
+        unsafe {
+            let _ = std::ffi::CString::from_raw(ptr);
+        }
+    }
+}
+

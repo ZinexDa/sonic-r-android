@@ -84,14 +84,15 @@
                     android:textSize="13sp" />
             </LinearLayout>
 
-            <!-- Inputs Row (2 Columns) -->
+            <!-- Host Mode: Inputs Row (Hub Address + Room Name) -->
             <LinearLayout
+                android:id="@+id/layout_host_inputs"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:orientation="horizontal">
 
-                <!-- Hub Address Column -->
+                <!-- Hub Address Column (Host) -->
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -108,7 +109,7 @@
                         android:textSize="11sp" />
 
                     <EditText
-                        android:id="@+id/et_hub_address"
+                        android:id="@+id/et_hub_address_host"
                         android:layout_width="match_parent"
                         android:layout_height="40dp"
                         android:layout_marginTop="4dp"
@@ -127,74 +128,166 @@
                     android:layout_width="14dp"
                     android:layout_height="match_parent" />
 
-                <!-- Room Target Column (Host Room Name or Join Room ID) -->
-                <FrameLayout
+                <!-- Room Name Column (Host) -->
+                <LinearLayout
+                    android:id="@+id/layout_room_name"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1">
+                    android:layout_weight="1"
+                    android:orientation="vertical">
 
-                    <!-- Host Mode: Room Name Input -->
-                    <LinearLayout
-                        android:id="@+id/layout_room_name"
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical">
+                        android:fontFamily="sans-serif-medium"
+                        android:letterSpacing="0.05"
+                        android:text="ROOM NAME"
+                        android:textColor="#90CAF9"
+                        android:textSize="11sp" />
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:fontFamily="sans-serif-medium"
-                            android:letterSpacing="0.05"
-                            android:text="ROOM NAME"
-                            android:textColor="#90CAF9"
-                            android:textSize="11sp" />
-
-                        <EditText
-                            android:id="@+id/et_room_name"
-                            android:layout_width="match_parent"
-                            android:layout_height="40dp"
-                            android:layout_marginTop="4dp"
-                            android:background="@drawable/bg_input_field"
-                            android:fontFamily="sans-serif"
-                            android:hint="Sonic Room"
-                            android:inputType="text"
-                            android:paddingStart="12dp"
-                            android:paddingEnd="12dp"
-                            android:textColor="#FFFFFF"
-                            android:textColorHint="#546E7A"
-                            android:textSize="13sp" />
-                    </LinearLayout>
-
-                    <!-- Join Mode: Room ID Input -->
-                    <LinearLayout
-                        android:id="@+id/layout_room_id"
+                    <EditText
+                        android:id="@+id/et_room_name"
                         android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="4dp"
+                        android:background="@drawable/bg_input_field"
+                        android:fontFamily="sans-serif"
+                        android:hint="Sonic Room"
+                        android:inputType="text"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#546E7A"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Join Mode: Hub Address + Refresh Row -->
+            <LinearLayout
+                android:id="@+id/layout_join_hub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="bottom"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-medium"
+                        android:letterSpacing="0.05"
+                        android:text="SIGNALING HUB ADDRESS"
+                        android:textColor="#90CAF9"
+                        android:textSize="11sp" />
+
+                    <EditText
+                        android:id="@+id/et_hub_address_join"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="4dp"
+                        android:background="@drawable/bg_input_field"
+                        android:fontFamily="sans-serif"
+                        android:hint="127.0.0.1:8080 or ws://..."
+                        android:inputType="textUri"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#546E7A"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="10dp"
+                    android:layout_height="match_parent" />
+
+                <Button
+                    android:id="@+id/btn_refresh"
+                    android:layout_width="100dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/btn_secondary"
+                    android:fontFamily="sans-serif-bold"
+                    android:letterSpacing="0.05"
+                    android:stateListAnimator="@null"
+                    android:text="REFRESH"
+                    android:textColor="#E0F2FE"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- Join Mode: Server Browser Layout -->
+            <LinearLayout
+                android:id="@+id/layout_server_browser"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- Header Row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif-medium"
+                        android:letterSpacing="0.05"
+                        android:text="ONLINE ROOMS"
+                        android:textColor="#90CAF9"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/tv_room_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-bold"
+                        android:text="0 online"
+                        android:textColor="#80D8FF"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <!-- Rooms List Container -->
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="145dp"
+                    android:layout_marginTop="6dp">
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rv_rooms"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scrollbars="vertical"
+                        android:visibility="gone" />
+
+                    <!-- Empty State Placeholder -->
+                    <LinearLayout
+                        android:id="@+id/layout_empty_state"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/bg_input_field"
+                        android:gravity="center"
                         android:orientation="vertical"
-                        android:visibility="gone">
+                        android:padding="16dp">
 
                         <TextView
+                            android:id="@+id/tv_empty_state"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:fontFamily="sans-serif-medium"
-                            android:letterSpacing="0.05"
-                            android:text="ROOM ID / CODE (OPTIONAL)"
-                            android:textColor="#90CAF9"
-                            android:textSize="11sp" />
-
-                        <EditText
-                            android:id="@+id/et_room_id"
-                            android:layout_width="match_parent"
-                            android:layout_height="40dp"
-                            android:layout_marginTop="4dp"
-                            android:background="@drawable/bg_input_field"
-                            android:fontFamily="sans-serif"
-                            android:hint="Leave empty for 1st room"
-                            android:inputType="text"
-                            android:paddingStart="12dp"
-                            android:paddingEnd="12dp"
-                            android:textColor="#FFFFFF"
-                            android:textColorHint="#546E7A"
+                            android:gravity="center"
+                            android:lineSpacingExtra="4dp"
+                            android:text="No active rooms found.\nHost a room or tap Refresh."
+                            android:textColor="#94A3B8"
                             android:textSize="13sp" />
                     </LinearLayout>
                 </FrameLayout>

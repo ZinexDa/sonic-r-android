@@ -232,7 +232,13 @@ pub async fn run_relay_keepalive(
     packet.extend_from_slice(b"PING");
 
     let mut interval = tokio::time::interval(KEEPALIVE_INTERVAL);
-    // Skip immediate tick
+    // Send immediate initial ping to register endpoint with relay
+    if let Err(err) = socket.send_to(&packet, relay_addr).await {
+        tracing::warn!(%relay_addr, %err, "Failed to send initial relay keepalive datagram");
+    } else {
+        tracing::info!(%relay_addr, "Sent initial relayed UDP keepalive to hub");
+    }
+    // Skip immediate tick of the interval timer
     interval.tick().await;
 
     let mut buf = [0u8; 128];
@@ -347,6 +353,7 @@ pub async fn manage_peer_connection(
         target_game_addr,
         None,
         None,
+        None,
     )
     .await;
 }
@@ -363,6 +370,7 @@ pub async fn manage_peer_connection_with_events(
     target_game_addr: Option<SocketAddr>,
     event_tx: Option<tokio::sync::mpsc::Sender<crate::runner::RunnerEvent>>,
     active_peers: Option<Arc<AtomicU32>>,
+    ws_tunnel: Option<crate::loopback::WsTunnelChannels>,
 ) {
     let force_relay = std::env::var("SIDECAR_FORCE_RELAY")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -427,7 +435,7 @@ pub async fn manage_peer_connection_with_events(
                         }).await;
                     }
                     let _guard = PeerCountGuard::new(active_peers, ws_cmd_tx);
-                    if let Err(err) = crate::loopback::run_tunnel_session_with_events(
+                    if let Err(err) = crate::loopback::run_tunnel_session_with_events_and_ws(
                         socket,
                         addr,
                         punch_token,
@@ -437,6 +445,7 @@ pub async fn manage_peer_connection_with_events(
                         false,
                         relay_rx,
                         event_tx,
+                        ws_tunnel,
                     ).await {
                         tracing::error!(%err, "Tunnel session error in relay mode");
                     }
@@ -455,7 +464,7 @@ pub async fn manage_peer_connection_with_events(
                 }).await;
             }
             let _guard = PeerCountGuard::new(active_peers, ws_cmd_tx);
-            if let Err(err) = crate::loopback::run_tunnel_session_with_events(
+            if let Err(err) = crate::loopback::run_tunnel_session_with_events_and_ws(
                 socket,
                 confirmed_peer,
                 punch_token,
@@ -465,6 +474,7 @@ pub async fn manage_peer_connection_with_events(
                 true,
                 relay_rx,
                 event_tx,
+                ws_tunnel,
             ).await {
                 tracing::error!(%err, "Tunnel session error in direct P2P mode");
             }
@@ -489,7 +499,7 @@ pub async fn manage_peer_connection_with_events(
             }).await;
         }
         let _guard = PeerCountGuard::new(active_peers, ws_cmd_tx);
-        if let Err(err) = crate::loopback::run_tunnel_session_with_events(
+        if let Err(err) = crate::loopback::run_tunnel_session_with_events_and_ws(
             socket,
             relay_addr,
             punch_token,
@@ -499,6 +509,7 @@ pub async fn manage_peer_connection_with_events(
             false,
             relay_rx,
             event_tx,
+            ws_tunnel,
         ).await {
             tracing::error!(%err, "Tunnel session error in relay mode");
         }

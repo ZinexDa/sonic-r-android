@@ -40,7 +40,14 @@ typedef enum {
     TOUCH_BIND_DRIFT_L,
     TOUCH_BIND_DRIFT_R,
     TOUCH_BIND_LOOK,
-    TOUCH_BIND_START
+    TOUCH_BIND_START,
+    /* Context-sensitive lobby buttons (Engine_GetLobbyState() > 0) */
+    TOUCH_BIND_LOBBY_F1,
+    TOUCH_BIND_LOBBY_F2,
+    TOUCH_BIND_LOBBY_F6,
+    TOUCH_BIND_LOBBY_F7,
+    TOUCH_BIND_LOBBY_F8,
+    TOUCH_BIND_LOBBY_ESC
 } TouchBinding;
 
 typedef struct {
@@ -74,6 +81,12 @@ typedef struct {
     int driftR;
     int look;
     int start;
+    int lobbyF1;
+    int lobbyF2;
+    int lobbyF6;
+    int lobbyF7;
+    int lobbyF8;
+    int lobbyEsc;
 } TouchButtonState;
 
 static TouchButtonState s_pressed;
@@ -87,6 +100,14 @@ typedef struct {
     float driftR_cx, driftR_cy, driftR_radius;
     float look_cx, look_cy, look_radius;
     float start_cx, start_cy, start_w, start_h;
+    /* Context-sensitive lobby buttons */
+    float lobby_f1_cx, lobby_f1_cy, lobby_f1_w, lobby_f1_h;
+    float lobby_f2_cx, lobby_f2_cy, lobby_f2_w, lobby_f2_h;
+    float lobby_f6_cx, lobby_f6_cy, lobby_f6_w, lobby_f6_h;
+    float lobby_f7_cx, lobby_f7_cy, lobby_f7_w, lobby_f7_h;
+    float lobby_f8_cx, lobby_f8_cy, lobby_f8_w, lobby_f8_h;
+    float lobby_center_f1_cx, lobby_center_f1_cy, lobby_center_f1_w, lobby_center_f1_h;
+    float lobby_esc_w, lobby_esc_h;
 } TouchLayout;
 
 /* Custom layout configuration persisted from Android settings (7 independent controls) */
@@ -321,6 +342,80 @@ static void ComputeLayout(int screenW, int screenH, TouchLayout *out)
         out->start_w  = H * 0.18f;
         out->start_h  = H * 0.075f;
     }
+
+    /* -------------------------------------------------------------
+     * Context-Sensitive Lobby Controls Layout (active when Engine_GetLobbyState() > 0)
+     * ------------------------------------------------------------- */
+    float btnH = H * 0.072f;
+    float gap = H * 0.018f;
+    float barY = H * 0.885f;
+
+    /* Base widths */
+    float wF6 = H * 0.160f;
+    float wF7 = H * 0.160f;
+    float wF8 = H * 0.170f;
+    float wF2 = H * 0.160f;
+    float wF1 = H * 0.210f;
+    float totalW = wF6 + wF7 + wF8 + wF2 + wF1 + gap * 4.0f;
+
+    /* Check available space between joystick and action buttons */
+    float clearLeft = out->dpad_cx + out->dpad_radius * 1.35f;
+    float clearRight = out->jump_cx - out->jump_radius * 1.35f;
+    float availW = clearRight - clearLeft;
+    float barScale = 1.0f;
+    if (availW > 0.0f && totalW > availW * 0.95f) {
+        barScale = (availW * 0.95f) / totalW;
+        wF6 *= barScale;
+        wF7 *= barScale;
+        wF8 *= barScale;
+        wF2 *= barScale;
+        wF1 *= barScale;
+        gap *= barScale;
+        btnH *= barScale;
+        totalW = wF6 + wF7 + wF8 + wF2 + wF1 + gap * 4.0f;
+    }
+
+    float startX = (W - totalW) * 0.5f;
+    float curX = startX;
+
+    out->lobby_f6_cx = curX + wF6 * 0.5f;
+    out->lobby_f6_cy = barY;
+    out->lobby_f6_w  = wF6;
+    out->lobby_f6_h  = btnH;
+    curX += wF6 + gap;
+
+    out->lobby_f7_cx = curX + wF7 * 0.5f;
+    out->lobby_f7_cy = barY;
+    out->lobby_f7_w  = wF7;
+    out->lobby_f7_h  = btnH;
+    curX += wF7 + gap;
+
+    out->lobby_f8_cx = curX + wF8 * 0.5f;
+    out->lobby_f8_cy = barY;
+    out->lobby_f8_w  = wF8;
+    out->lobby_f8_h  = btnH;
+    curX += wF8 + gap;
+
+    out->lobby_f2_cx = curX + wF2 * 0.5f;
+    out->lobby_f2_cy = barY;
+    out->lobby_f2_w  = wF2;
+    out->lobby_f2_h  = btnH;
+    curX += wF2 + gap;
+
+    out->lobby_f1_cx = curX + wF1 * 0.5f;
+    out->lobby_f1_cy = barY;
+    out->lobby_f1_w  = wF1;
+    out->lobby_f1_h  = btnH;
+
+    /* Center F1 GO! direct hit area (aligns with 3D lobby "F1 GO!" graphic in middle) */
+    out->lobby_center_f1_cx = W * 0.5f;
+    out->lobby_center_f1_cy = H * 0.50f;
+    out->lobby_center_f1_w  = H * 0.40f;
+    out->lobby_center_f1_h  = H * 0.12f;
+
+    /* Top-left "Esc..." hit area during lobby */
+    out->lobby_esc_w = W * 0.35f;
+    out->lobby_esc_h = H * 0.22f;
 }
 
 /* =====================================================================
@@ -344,6 +439,31 @@ static int HitTestPill(float px, float py, float cx, float cy, float halfW, floa
 
 static TouchBinding DetermineTouchBinding(float px, float py, const TouchLayout *layout)
 {
+    /* 0. Context-sensitive lobby controls: active strictly when in multiplayer lobby (Engine_GetLobbyState() > 0) */
+    if (Engine_GetLobbyState() > 0) {
+        if (px >= 0.0f && px <= layout->lobby_esc_w && py >= 0.0f && py <= layout->lobby_esc_h) {
+            return TOUCH_BIND_LOBBY_ESC;
+        }
+        if (HitTestPill(px, py, layout->lobby_f1_cx, layout->lobby_f1_cy, layout->lobby_f1_w * 0.5f, layout->lobby_f1_h * 0.5f)) {
+            return TOUCH_BIND_LOBBY_F1;
+        }
+        if (HitTestPill(px, py, layout->lobby_center_f1_cx, layout->lobby_center_f1_cy, layout->lobby_center_f1_w * 0.5f, layout->lobby_center_f1_h * 0.5f)) {
+            return TOUCH_BIND_LOBBY_F1;
+        }
+        if (HitTestPill(px, py, layout->lobby_f7_cx, layout->lobby_f7_cy, layout->lobby_f7_w * 0.5f, layout->lobby_f7_h * 0.5f)) {
+            return TOUCH_BIND_LOBBY_F7;
+        }
+        if (HitTestPill(px, py, layout->lobby_f8_cx, layout->lobby_f8_cy, layout->lobby_f8_w * 0.5f, layout->lobby_f8_h * 0.5f)) {
+            return TOUCH_BIND_LOBBY_F8;
+        }
+        if (HitTestPill(px, py, layout->lobby_f6_cx, layout->lobby_f6_cy, layout->lobby_f6_w * 0.5f, layout->lobby_f6_h * 0.5f)) {
+            return TOUCH_BIND_LOBBY_F6;
+        }
+        if (HitTestPill(px, py, layout->lobby_f2_cx, layout->lobby_f2_cy, layout->lobby_f2_w * 0.5f, layout->lobby_f2_h * 0.5f)) {
+            return TOUCH_BIND_LOBBY_F2;
+        }
+    }
+
     /* 1. Check Start pill button */
     if (HitTestPill(px, py, layout->start_cx, layout->start_cy, layout->start_w * 0.5f, layout->start_h * 0.5f)) {
         return TOUCH_BIND_START;
@@ -756,6 +876,30 @@ void TouchOverlay_Update(unsigned char *keystate)
                 s_pressed.start = 1;
                 break;
 
+            case TOUCH_BIND_LOBBY_F1:
+                s_pressed.lobbyF1 = 1;
+                break;
+
+            case TOUCH_BIND_LOBBY_F2:
+                s_pressed.lobbyF2 = 1;
+                break;
+
+            case TOUCH_BIND_LOBBY_F6:
+                s_pressed.lobbyF6 = 1;
+                break;
+
+            case TOUCH_BIND_LOBBY_F7:
+                s_pressed.lobbyF7 = 1;
+                break;
+
+            case TOUCH_BIND_LOBBY_F8:
+                s_pressed.lobbyF8 = 1;
+                break;
+
+            case TOUCH_BIND_LOBBY_ESC:
+                s_pressed.lobbyEsc = 1;
+                break;
+
             case TOUCH_BIND_NONE:
             default:
                 break;
@@ -778,25 +922,32 @@ void TouchOverlay_Update(unsigned char *keystate)
 
     /* Log changes for debugging */
     if (memcmp(&prev, &s_pressed, sizeof(s_pressed)) != 0) {
-        SDL_Log("TouchOverlay: pressed [U:%d D:%d L:%d R:%d A:%d J:%d DL:%d DR:%d Eye:%d Start:%d]",
+        SDL_Log("TouchOverlay: pressed [U:%d D:%d L:%d R:%d A:%d J:%d DL:%d DR:%d Eye:%d Start:%d | F1:%d F2:%d F6:%d F7:%d F8:%d Esc:%d]",
                 s_pressed.up, s_pressed.down, s_pressed.left, s_pressed.right,
                 s_pressed.accel, s_pressed.jump, s_pressed.driftL, s_pressed.driftR,
-                s_pressed.look, s_pressed.start);
+                s_pressed.look, s_pressed.start,
+                s_pressed.lobbyF1, s_pressed.lobbyF2, s_pressed.lobbyF6, s_pressed.lobbyF7, s_pressed.lobbyF8, s_pressed.lobbyEsc);
     }
 
     /* Build touch scancode buffer */
     memset(s_touchKeystate, 0, sizeof(s_touchKeystate));
 
-    if (s_pressed.up)     s_touchKeystate[0xC8] = 0x80; /* DIK_UP */
-    if (s_pressed.down)   s_touchKeystate[0xD0] = 0x80; /* DIK_DOWN */
-    if (s_pressed.left)   s_touchKeystate[0xCB] = 0x80; /* DIK_LEFT */
-    if (s_pressed.right)  s_touchKeystate[0xCD] = 0x80; /* DIK_RIGHT */
-    if (s_pressed.start)  s_touchKeystate[0x1C] = 0x80; /* DIK_RETURN */
-    if (s_pressed.jump)   s_touchKeystate[0x1E] = 0x80; /* Button B -> DIK_A (Accel) */
-    if (s_pressed.accel)  s_touchKeystate[0x39] = 0x80; /* Button A -> DIK_SPACE (Confirm / Jump) */
-    if (s_pressed.driftL) s_touchKeystate[0x2C] = 0x80; /* DIK_Z */
-    if (s_pressed.driftR) s_touchKeystate[0x2D] = 0x80; /* DIK_X */
-    if (s_pressed.look)   s_touchKeystate[0x02] = 0x80; /* DIK_1 */
+    if (s_pressed.up)       s_touchKeystate[0xC8] = 0x80; /* DIK_UP */
+    if (s_pressed.down)     s_touchKeystate[0xD0] = 0x80; /* DIK_DOWN */
+    if (s_pressed.left)     s_touchKeystate[0xCB] = 0x80; /* DIK_LEFT */
+    if (s_pressed.right)    s_touchKeystate[0xCD] = 0x80; /* DIK_RIGHT */
+    if (s_pressed.start)    s_touchKeystate[0x1C] = 0x80; /* DIK_RETURN */
+    if (s_pressed.jump)     s_touchKeystate[0x1E] = 0x80; /* Button B -> DIK_A (Accel) */
+    if (s_pressed.accel)    s_touchKeystate[0x39] = 0x80; /* Button A -> DIK_SPACE (Confirm / Jump) */
+    if (s_pressed.driftL)   s_touchKeystate[0x2C] = 0x80; /* DIK_Z */
+    if (s_pressed.driftR)   s_touchKeystate[0x2D] = 0x80; /* DIK_X */
+    if (s_pressed.look)     s_touchKeystate[0x02] = 0x80; /* DIK_1 */
+    if (s_pressed.lobbyF1)  s_touchKeystate[0x3B] = 0x80; /* DIK_F1 (Start Race) */
+    if (s_pressed.lobbyF2)  s_touchKeystate[0x3C] = 0x80; /* DIK_F2 (Mode / Ready) */
+    if (s_pressed.lobbyF6)  s_touchKeystate[0x40] = 0x80; /* DIK_F6 (Cycle Character) */
+    if (s_pressed.lobbyF7)  s_touchKeystate[0x41] = 0x80; /* DIK_F7 (Toggle Mode) */
+    if (s_pressed.lobbyF8)  s_touchKeystate[0x42] = 0x80; /* DIK_F8 (Cycle Track) */
+    if (s_pressed.lobbyEsc) s_touchKeystate[0x01] = 0x80; /* DIK_ESCAPE (Exit Lobby) */
 
     /* Union with physical keystate into target keystate buffer */
     if (keystate) {
@@ -815,7 +966,7 @@ typedef struct {
     float r, g, b, a;
 } OverlayVertex;
 
-#define MAX_OVERLAY_VERTICES 4096
+#define MAX_OVERLAY_VERTICES 8192
 static OverlayVertex s_vertices[MAX_OVERLAY_VERTICES];
 static int s_numVertices = 0;
 
@@ -1274,6 +1425,158 @@ static void DrawTexturedButton(GLuint texId, float cx, float cy, float radius, i
 }
 
 /* =====================================================================
+ * Lobby Font & UI Helpers
+ * ===================================================================== */
+
+static const unsigned char s_lobbyFont[40][7] = {
+    {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11}, /* A */
+    {0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E}, /* B */
+    {0x0E,0x11,0x10,0x10,0x10,0x11,0x0E}, /* C */
+    {0x1E,0x11,0x11,0x11,0x11,0x11,0x1E}, /* D */
+    {0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F}, /* E */
+    {0x1F,0x10,0x10,0x1E,0x10,0x10,0x10}, /* F */
+    {0x0E,0x11,0x10,0x17,0x11,0x11,0x0E}, /* G */
+    {0x11,0x11,0x11,0x1F,0x11,0x11,0x11}, /* H */
+    {0x0E,0x04,0x04,0x04,0x04,0x04,0x0E}, /* I */
+    {0x07,0x02,0x02,0x02,0x02,0x12,0x0C}, /* J */
+    {0x11,0x12,0x14,0x18,0x14,0x12,0x11}, /* K */
+    {0x10,0x10,0x10,0x10,0x10,0x10,0x1F}, /* L */
+    {0x11,0x1B,0x15,0x15,0x11,0x11,0x11}, /* M */
+    {0x11,0x19,0x15,0x13,0x11,0x11,0x11}, /* N */
+    {0x0E,0x11,0x11,0x11,0x11,0x11,0x0E}, /* O */
+    {0x1E,0x11,0x11,0x1E,0x10,0x10,0x10}, /* P */
+    {0x0E,0x11,0x11,0x11,0x15,0x12,0x0D}, /* Q */
+    {0x1E,0x11,0x11,0x1E,0x14,0x12,0x11}, /* R */
+    {0x0E,0x11,0x10,0x0E,0x01,0x11,0x0E}, /* S */
+    {0x1F,0x04,0x04,0x04,0x04,0x04,0x04}, /* T */
+    {0x11,0x11,0x11,0x11,0x11,0x11,0x0E}, /* U */
+    {0x11,0x11,0x11,0x11,0x0A,0x0A,0x04}, /* V */
+    {0x11,0x11,0x11,0x15,0x15,0x1B,0x11}, /* W */
+    {0x11,0x11,0x0A,0x04,0x0A,0x11,0x11}, /* X */
+    {0x11,0x11,0x0A,0x04,0x04,0x04,0x04}, /* Y */
+    {0x1F,0x01,0x02,0x04,0x08,0x10,0x1F}, /* Z */
+    {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E}, /* 0 */
+    {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E}, /* 1 */
+    {0x0E,0x11,0x01,0x06,0x08,0x10,0x1F}, /* 2 */
+    {0x0E,0x11,0x01,0x06,0x01,0x11,0x0E}, /* 3 */
+    {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02}, /* 4 */
+    {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E}, /* 5 */
+    {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E}, /* 6 */
+    {0x1F,0x01,0x02,0x04,0x04,0x04,0x04}, /* 7 */
+    {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E}, /* 8 */
+    {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C}, /* 9 */
+    {0x00,0x00,0x00,0x00,0x00,0x0C,0x0C}, /* . */
+    {0x01,0x02,0x02,0x04,0x08,0x08,0x10}, /* / */
+    {0x00,0x00,0x00,0x1F,0x00,0x00,0x00}, /* - */
+    {0x0E,0x11,0x01,0x02,0x04,0x00,0x04}  /* ? */
+};
+
+static void DrawString(float startX, float startY, const char *str, float pxSize, float r, float g, float b, float a)
+{
+    float curX = startX;
+    for (int i = 0; str[i]; i++) {
+        char c = str[i];
+        if (c == ' ') {
+            curX += 4.0f * pxSize;
+            continue;
+        }
+        int idx = -1;
+        if (c >= 'A' && c <= 'Z') idx = c - 'A';
+        else if (c >= 'a' && c <= 'z') idx = c - 'a';
+        else if (c >= '0' && c <= '9') idx = 26 + (c - '0');
+        else if (c == '.') idx = 36;
+        else if (c == '/') idx = 37;
+        else if (c == '-') idx = 38;
+        else if (c == '?') idx = 39;
+
+        if (idx >= 0) {
+            for (int row = 0; row < 7; row++) {
+                unsigned char bits = s_lobbyFont[idx][row];
+                int col = 0;
+                while (col < 5) {
+                    if (bits & (1 << (4 - col))) {
+                        int runLen = 1;
+                        while ((col + runLen < 5) && (bits & (1 << (4 - (col + runLen))))) {
+                            runLen++;
+                        }
+                        AddRect(curX + (float)col * pxSize, startY + (float)row * pxSize,
+                                (float)runLen * pxSize, pxSize, r, g, b, a);
+                        col += runLen;
+                    } else {
+                        col++;
+                    }
+                }
+            }
+        }
+        curX += 6.0f * pxSize;
+    }
+}
+
+static float MeasureString(const char *str, float pxSize)
+{
+    float len = 0.0f;
+    for (int i = 0; str[i]; i++) {
+        if (str[i] == ' ') {
+            len += 4.0f * pxSize;
+        } else {
+            len += 6.0f * pxSize;
+        }
+    }
+    return len;
+}
+
+static void DrawCenteredString(float cx, float cy, const char *str, float pxSize, float r, float g, float b, float a)
+{
+    float totalW = MeasureString(str, pxSize);
+    float startX = cx - totalW * 0.5f;
+    float startY = cy - (7.0f * pxSize) * 0.5f;
+    DrawString(startX, startY, str, pxSize, r, g, b, a);
+}
+
+static void DrawPillButton(float cx, float cy, float w, float h, const char *text,
+                           float bgR, float bgG, float bgB, float bgA,
+                           float borderR, float borderG, float borderB, float borderA,
+                           int isPressed)
+{
+    float scale = isPressed ? 0.93f : 1.0f;
+    float r = h * 0.5f * scale;
+    float straightW = (w - h) * scale;
+    if (straightW < 0.0f) straightW = 0.0f;
+    float halfStraightW = straightW * 0.5f;
+    float alphaMod = isPressed ? 1.0f : 0.85f;
+
+    /* Center straight rectangle */
+    if (straightW > 0.0f) {
+        AddRect(cx - halfStraightW, cy - r, straightW, r * 2.0f, bgR, bgG, bgB, bgA * alphaMod);
+    }
+    /* Left and right circle endcaps */
+    AddCircle(cx - halfStraightW, cy, r, 16, bgR, bgG, bgB, bgA * alphaMod);
+    AddCircle(cx + halfStraightW, cy, r, 16, bgR, bgG, bgB, bgA * alphaMod);
+
+    /* Border */
+    float bThick = isPressed ? 3.0f : 2.0f;
+    if (straightW > 0.0f) {
+        AddLine(cx - halfStraightW, cy - r, cx + halfStraightW, cy - r, bThick, borderR, borderG, borderB, borderA);
+        AddLine(cx - halfStraightW, cy + r, cx + halfStraightW, cy + r, bThick, borderR, borderG, borderB, borderA);
+    }
+    AddWedge(cx - halfStraightW, cy, r - bThick, r, 90.0f * (float)M_PI / 180.0f, 270.0f * (float)M_PI / 180.0f, 12,
+             borderR, borderG, borderB, borderA);
+    AddWedge(cx + halfStraightW, cy, r - bThick, r, -90.0f * (float)M_PI / 180.0f, 90.0f * (float)M_PI / 180.0f, 12,
+             borderR, borderG, borderB, borderA);
+
+    /* Text */
+    float pxSize = (r * 2.0f * 0.40f) / 7.0f;
+    float maxTextW = w * 0.80f;
+    float textW = MeasureString(text, pxSize);
+    if (textW > maxTextW && textW > 0.0f) {
+        pxSize *= (maxTextW / textW);
+    }
+    if (pxSize < 1.6f) pxSize = 1.6f;
+    DrawCenteredString(cx, cy, text, pxSize, 1.0f, 1.0f, 1.0f, isPressed ? 1.0f : 0.95f);
+}
+
+
+/* =====================================================================
  * Render Overlay Entry Point
  * ===================================================================== */
 
@@ -1462,6 +1765,64 @@ void TouchOverlay_Render(int screenWidth, int screenHeight)
                  1.0f, 0.4f, 0.4f, 0.8f);
 
         DrawGlyphStart(cx, cy, halfH * 0.85f, glyphThick, 1.0f, 1.0f, 1.0f, 0.95f);
+    }
+
+    /* -------------------------------------------------------------
+     * 2.5 Context-Sensitive Lobby Controls & Hints (Engine_GetLobbyState() > 0)
+     * ------------------------------------------------------------- */
+    int lobbyState = Engine_GetLobbyState();
+    if (lobbyState > 0) {
+        /* A. Directly-tappable Lobby Action Bar pills along bottom center */
+        /* F6 CHAR (Cyan) */
+        DrawPillButton(layout.lobby_f6_cx, layout.lobby_f6_cy, layout.lobby_f6_w, layout.lobby_f6_h,
+                       "F6 CHAR",
+                       s_pressed.lobbyF6 ? 0.20f : 0.08f, s_pressed.lobbyF6 ? 0.85f : 0.45f, s_pressed.lobbyF6 ? 1.0f : 0.70f, s_pressed.lobbyF6 ? 0.90f : 0.60f,
+                       0.30f, 0.85f, 1.0f, s_pressed.lobbyF6 ? 1.0f : 0.80f,
+                       s_pressed.lobbyF6);
+
+        /* F7 MODE (Orange) */
+        DrawPillButton(layout.lobby_f7_cx, layout.lobby_f7_cy, layout.lobby_f7_w, layout.lobby_f7_h,
+                       "F7 MODE",
+                       s_pressed.lobbyF7 ? 1.0f : 0.70f, s_pressed.lobbyF7 ? 0.60f : 0.35f, s_pressed.lobbyF7 ? 0.20f : 0.08f, s_pressed.lobbyF7 ? 0.90f : 0.60f,
+                       1.0f, 0.65f, 0.20f, s_pressed.lobbyF7 ? 1.0f : 0.80f,
+                       s_pressed.lobbyF7);
+
+        /* F8 TRACK (Blue / Indigo) */
+        DrawPillButton(layout.lobby_f8_cx, layout.lobby_f8_cy, layout.lobby_f8_w, layout.lobby_f8_h,
+                       "F8 TRACK",
+                       s_pressed.lobbyF8 ? 0.25f : 0.12f, s_pressed.lobbyF8 ? 0.55f : 0.30f, s_pressed.lobbyF8 ? 1.0f : 0.80f, s_pressed.lobbyF8 ? 0.90f : 0.60f,
+                       0.45f, 0.70f, 1.0f, s_pressed.lobbyF8 ? 1.0f : 0.80f,
+                       s_pressed.lobbyF8);
+
+        /* F2 READY / JOIN (Amber / Gold) */
+        DrawPillButton(layout.lobby_f2_cx, layout.lobby_f2_cy, layout.lobby_f2_w, layout.lobby_f2_h,
+                       (lobbyState == 2) ? "F2 READY" : "F2 JOIN",
+                       s_pressed.lobbyF2 ? 0.95f : 0.65f, s_pressed.lobbyF2 ? 0.80f : 0.50f, s_pressed.lobbyF2 ? 0.20f : 0.10f, s_pressed.lobbyF2 ? 0.90f : 0.60f,
+                       1.0f, 0.85f, 0.25f, s_pressed.lobbyF2 ? 1.0f : 0.80f,
+                       s_pressed.lobbyF2);
+
+        /* F1 START RACE / HOST (Emerald Green, Glowing) */
+        DrawPillButton(layout.lobby_f1_cx, layout.lobby_f1_cy, layout.lobby_f1_w, layout.lobby_f1_h,
+                       (lobbyState == 2) ? "F1 START" : "F1 HOST",
+                       s_pressed.lobbyF1 ? 0.18f : 0.10f, s_pressed.lobbyF1 ? 0.95f : 0.65f, s_pressed.lobbyF1 ? 0.35f : 0.22f, s_pressed.lobbyF1 ? 0.95f : 0.75f,
+                       0.40f, 1.0f, 0.60f, s_pressed.lobbyF1 ? 1.0f : 0.85f,
+                       s_pressed.lobbyF1);
+
+        /* Glowing outer ring around F1 START */
+        AddRing(layout.lobby_f1_cx, layout.lobby_f1_cy, layout.lobby_f1_h * 0.48f, layout.lobby_f1_h * 0.58f, 24,
+                0.30f, 1.0f, 0.50f, s_pressed.lobbyF1 ? 0.80f : 0.35f);
+
+        /* B. Interactive Center F1 GO! highlight in 3D viewport */
+        if (s_pressed.lobbyF1) {
+            float cX = layout.lobby_center_f1_cx;
+            float cY = layout.lobby_center_f1_cy;
+            float cHW = layout.lobby_center_f1_w * 0.5f;
+            float cHH = layout.lobby_center_f1_h * 0.5f;
+            AddRing(cX - cHW + cHH, cY, cHH - 4.0f, cHH + 2.0f, 20, 0.40f, 1.0f, 0.60f, 0.85f);
+            AddRing(cX + cHW - cHH, cY, cHH - 4.0f, cHH + 2.0f, 20, 0.40f, 1.0f, 0.60f, 0.85f);
+            AddLine(cX - cHW + cHH, cY - cHH, cX + cHW - cHH, cY - cHH, 3.0f, 0.40f, 1.0f, 0.60f, 0.85f);
+            AddLine(cX - cHW + cHH, cY + cHH, cX + cHW - cHH, cY + cHH, 3.0f, 0.40f, 1.0f, 0.60f, 0.85f);
+        }
     }
 
     /* Set 2D overlay render states */

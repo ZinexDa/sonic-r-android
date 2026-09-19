@@ -26,18 +26,54 @@
 #ifndef SONICR_DC
 #include <dlfcn.h>
 #endif
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+#include "platform.h"
+
+/* Client: 1 once we've received SLOT_ASSIGN from the host. Gates client→host
+ * sends so we don't spray pad packets at a host that hasn't accepted us. */
+static int s_haveSlotAssign = 0;
+static DWORD s_lastJoinReqMs = 0;
 
 /* Helper to cleanly signal the Rust netplay sidecar to stop when session ends */
-static void net_sidecar_stop(void)
+void net_sidecar_stop(void)
 {
+    s_haveSlotAssign = 0;
+    s_lastJoinReqMs = 0;
 #ifndef SONICR_DC
     typedef void (*netplay_stop_fn)(void);
-    void *handle = dlopen("libsonicr_netplay.so", RTLD_NOW | RTLD_NOLOAD);
-    if (handle) {
-        netplay_stop_fn fn = (netplay_stop_fn)dlsym(handle, "netplay_stop");
-        if (fn) {
-            fn();
+    netplay_stop_fn fn = NULL;
+
+    /* 1. Try global symbol lookup across loaded libraries */
+    fn = (netplay_stop_fn)dlsym(RTLD_DEFAULT, "netplay_stop");
+
+    /* 2. Fallback to explicit dlopen if not yet resolved */
+    if (!fn) {
+        void *handle = dlopen("libsonicr_netplay.so", RTLD_NOW);
+        if (!handle) {
+            handle = dlopen("libsonicr_netplay.so", RTLD_NOW | RTLD_NOLOAD);
         }
+        if (handle) {
+            fn = (netplay_stop_fn)dlsym(handle, "netplay_stop");
+        }
+    }
+
+    if (fn) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_INFO, "SonicRNetplay", "net_sidecar_stop: invoking netplay_stop()");
+#else
+        printf("[NET_DEBUG] net_sidecar_stop: invoking netplay_stop()\n");
+        fflush(stdout);
+#endif
+        fn();
+    } else {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_WARN, "SonicRNetplay", "net_sidecar_stop: netplay_stop symbol not found");
+#else
+        printf("[NET_DEBUG] net_sidecar_stop: netplay_stop symbol not found\n");
+        fflush(stdout);
+#endif
     }
 #endif
 }
@@ -305,9 +341,6 @@ static char s_netSlotNames[NET_MAX_PLAYERS][MM_MAX_USERNAME];
 static char    s_netSlotPlatform[NET_MAX_PLAYERS][NET_PLATFORM_LEN];
 static uint8_t s_netSlotRegion[NET_MAX_PLAYERS];
 
-/* Client: 1 once we've received SLOT_ASSIGN from the host. Gates client→host
- * sends so we don't spray pad packets at a host that hasn't accepted us. */
-static int s_haveSlotAssign = 0;
 
 static DWORD s_lastHostPacketMs = 0;
 
@@ -348,6 +381,56 @@ static void NetSnapshotReset(void)
     }
     s_hostKeyframeCountdown = 0;
     s_clientKeyframeCountdown = 0;
+}
+
+/* Send join request (NET_MSG_JOIN_REQ) to host, mimicking --autojoin behavior on PC */
+static void send_client_join_request(void)
+{
+    if (s_haveSlotAssign) return;
+
+    DWORD now = timeGetTime();
+    if (s_lastJoinReqMs != 0 && (now - s_lastJoinReqMs < 1000)) {
+        return;
+    }
+    s_lastJoinReqMs = now;
+
+    /* Ensure client transport connection is initialized */
+    if (!net_is_active()) {
+        extern const char *g_cmdHostIP;
+        const char *hip = (g_cmdHostIP != NULL && g_cmdHostIP[0] != '\0') ? g_cmdHostIP : "127.0.0.1";
+        net_client_connect(hip, NET_PORT_DEFAULT);
+    }
+
+    struct {
+        int     hdr;
+        char    name[MM_MAX_USERNAME];
+        char    platform[16];
+        uint8_t region;
+    } joinReq;
+    memset(&joinReq, 0, sizeof(joinReq));
+    joinReq.hdr = NET_MSG_JOIN_REQ;
+    const char *uname = MatchmakerGetUsername();
+    if (uname == NULL || uname[0] == '\0') {
+        uname = "Player";
+    }
+    strncpy(joinReq.name, uname, MM_MAX_USERNAME - 1);
+    strncpy(joinReq.platform, MM_PLATFORM, sizeof(joinReq.platform) - 1);
+    joinReq.region = (uint8_t)platform_get_region();
+
+    net_send_to_host(&joinReq, sizeof(joinReq));
+
+    printf("[NET_DEBUG] Client: sent NET_MSG_JOIN_REQ as '%s' (platform=%s, region=%d)\n",
+           joinReq.name, joinReq.platform, joinReq.region);
+    fflush(stdout);
+#ifdef __ANDROID__
+    __android_log_print(ANDROID_LOG_INFO, "SonicRNetplay",
+                        "Client: sent NET_MSG_JOIN_REQ as '%s' (platform=%s, region=%d)",
+                        joinReq.name, joinReq.platform, joinReq.region);
+#endif
+
+    if (g_resultsState < 2) {
+        g_resultsState = 2;
+    }
 }
 
 /* Per-player state within a snapshot — matches 0xFFF0002F layout minus 4-byte header */
@@ -1000,6 +1083,7 @@ void CloseDirectPlaySession(void)
         net_send_to_host(_lbuf, 4);
     }
     s_haveSlotAssign = 0;
+    s_lastJoinReqMs = 0;
     memset(s_hostSlotLastRecvMs, 0, sizeof(s_hostSlotLastRecvMs));
 
     /* Host/client discriminator, set to 1 by CreateNetworkSession (main.c).
@@ -1449,6 +1533,24 @@ void ApplyNetworkPlayerState(void)
     for (i = 0; i < 4; i++)
         s_playerRecvFlags[i] = 0;
 
+    /* Check for discovery response on discovery socket if in client join mode */
+    if (!net_is_host() && !s_haveSlotAssign) {
+        char discHost[64];
+        if (net_discover_check(discHost, sizeof(discHost))) {
+            printf("[NET_DEBUG] Client: net_discover_check received NET_DISCOVER_REPLY from %s\n", discHost);
+            fflush(stdout);
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_INFO, "SonicRNetplay",
+                                "Client: net_discover_check received NET_DISCOVER_REPLY from %s", discHost);
+#endif
+            extern const char *g_cmdHostIP;
+            if (g_cmdHostIP == NULL || strcmp(g_cmdHostIP, "127.0.0.1") == 0) {
+                net_client_connect(discHost, NET_PORT_DEFAULT);
+            }
+            send_client_join_request();
+        }
+    }
+
     /* Process all pending network messages */
     while ((len = net_poll_one(buf, sizeof(buf), &from_slot)) > 0) {
         if (len < 4) continue;  /* need at least a header */
@@ -1458,6 +1560,18 @@ void ApplyNetworkPlayerState(void)
             printf("[NET_DEBUG] %s: dequeued packet 0x%08X (len=%d) from slot %d\n",
                    net_is_host() ? "Host" : "Client", header, len, from_slot);
             fflush(stdout);
+        }
+
+        /* Discovery response from host: immediately trigger join request (mimicking --autojoin on PC) */
+        if (!net_is_host() && header == NET_DISCOVER_REPLY) {
+            printf("[NET_DEBUG] Client: received NET_DISCOVER_REPLY from host via net_poll_one, triggering JOIN_REQ\n");
+            fflush(stdout);
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_INFO, "SonicRNetplay",
+                                "Client: received NET_DISCOVER_REPLY from host via net_poll_one, triggering JOIN_REQ");
+#endif
+            send_client_join_request();
+            continue;
         }
 
         /* If client receives race traffic (snapshot or client input), the race has already started on host */
@@ -1715,6 +1829,9 @@ void ApplyNetworkPlayerState(void)
                 DebugLog("Client: SLOT_ASSIGN slot=%d, host='%s'\n",
                          slot, net_get_slot_name(0));
                 s_haveSlotAssign = 1;
+                if (g_resultsState < 2) {
+                    g_resultsState = 2;
+                }
             }
             continue;
         }
@@ -2035,6 +2152,7 @@ void ApplyNetworkPlayerState(void)
             }
             s_lastHostPacketMs = 0;
             s_haveSlotAssign   = 0;
+            s_lastJoinReqMs    = 0;
         }
     }
 

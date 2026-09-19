@@ -241,6 +241,11 @@ void net_set_local_slot(int slot);
 void net_close(void);
 
 /**
+ * Signal the netplay sidecar to stop session and disconnect from hub.
+ */
+void net_sidecar_stop(void);
+
+/**
  * Host: free a client slot. Future packets from the previous source IP
  * are treated as a fresh unknown sender (subject to the host's join gate).
  */

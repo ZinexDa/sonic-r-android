@@ -42,6 +42,9 @@ class GameActivity : SDLActivity() {
             hostIp: String,
             port: Int
         )
+
+        @JvmStatic
+        external fun nativeSaveSettings()
     }
 
     override fun getLibraries(): Array<String> {
@@ -87,14 +90,43 @@ class GameActivity : SDLActivity() {
         applyControlSettings()
     }
 
+    override fun onPause() {
+        super.onPause()
+        try {
+            nativeSaveSettings()
+            Log.i(TAG, "onPause: saved settings to disk")
+        } catch (e: Throwable) {
+            Log.w(TAG, "nativeSaveSettings onPause failed: ${e.message}")
+        }
+    }
+
+    private var isNetplayStarted = false
+
     private fun applyNetplaySettings() {
         val isNetplay = intent?.getBooleanExtra("IS_NETPLAY", false) ?: false
         if (!isNetplay) return
         val isHost = intent?.getBooleanExtra("IS_HOST", true) ?: true
         val port = intent?.getIntExtra("GAME_PORT", 5029) ?: 5029
+        val hubUrl = intent?.getStringExtra("HUB_URL") ?: "127.0.0.1:8080"
+        val roomName = intent?.getStringExtra("ROOM_NAME") ?: "Sonic Room"
+        val roomId = intent?.getStringExtra("ROOM_ID")
+
         try {
-            Log.i(TAG, "Applying netplay settings: isHost=$isHost, port=$port")
             nativeSetNetplayMode(true, isHost, "127.0.0.1", port)
+
+            if (!isNetplayStarted) {
+                isNetplayStarted = true
+                Log.i(TAG, "Starting netplay session: isHost=$isHost, port=$port, hubUrl=$hubUrl, roomName=$roomName")
+                val initRes = NetplayBridge.init()
+                Log.i(TAG, "NetplayBridge.init() returned $initRes")
+
+                val startRes = if (isHost) {
+                    NetplayBridge.startHost(hubUrl, roomName, port)
+                } else {
+                    NetplayBridge.startJoin(hubUrl, roomId, port)
+                }
+                Log.i(TAG, "NetplayBridge session started (res=$startRes, isHost=$isHost)")
+            }
         } catch (e: UnsatisfiedLinkError) {
             Log.w(TAG, "Native netplay method not yet linked: ${e.message}")
         } catch (e: Exception) {
@@ -196,6 +228,10 @@ class GameActivity : SDLActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            nativeSaveSettings()
+            Log.i(TAG, "onDestroy: saved settings before exit")
+        } catch (_: Throwable) {}
         NetplayBridge.stop()
         // Terminate the isolated :game process immediately.
         // We intentionally do NOT call super.onDestroy() because SDLActivity.onDestroy()
