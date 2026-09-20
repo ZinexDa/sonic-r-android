@@ -727,35 +727,22 @@ void InitRaceStart(void)
  * ===================================================================== */
 void ClearPlayerSFXState(void)                            /* 0x496ac8 */
 {
-    for (int i = 0; i < g_numViewports; i++) {            /* 0x496b54 */
-        Player *player = &g_playerBase[i];
-        int isLocal;
+    int targetIdx = 0;
+    if (g_netSessionActive != 0) {
+        targetIdx = (int)(unsigned short)g_localPlayerIndex;
+    }
 
-        if (g_netSessionActive != 0) {                       /* 0x496b62 */
-            /* In multiplayer, only the local player is "local" */
-            unsigned short localIdx = *(unsigned short *)&g_localPlayerIndex;  /* 0x68acdc */
-            isLocal = (i == (int)localIdx) ? 1 : 0;       /* 0x496b77 */
-        }
-        else {
-            isLocal = 1;                                  /* 0x496ae7 */
-        }
-
-        if (!isLocal) {                                   /* 0x496aec/0x496aee: je 0x496b4d */
-            continue;
+    if (targetIdx >= 0 && targetIdx < 5) {
+        Player *player = &g_playerBase[targetIdx];
+        if ((player->sfxTrigger == 3 || player->sfxTrigger == 4) &&
+            player->charId == CHAR_TAILS &&
+            (player->animId == 0xC || player->animId == 0xD)) {
+            player->sfxTrigger = (short)0xFFFF;
         }
 
-        int animState = player->sfxTrigger;               /* 0x496af0 — upper 16 of int at 0xE8 = short at 0xEA */
-        if ((animState == 3 || animState == 4) &&         /* 0x496af9 */
-            player->charId == CHAR_TAILS &&               /* 0x496b03 */
-            (player->animId == 0xC ||                     /* 0x496b18 — upper 16 of int at 0x96 = short at 0x98 */
-             player->animId == 0xD))
-        {                                                 /* 0x496b1d */
-            player->sfxTrigger = (short)0xFFFF;           /* 0x496b22 */
-        }
-
-        if (player->sfxTrigger != -1) {                   /* 0x496b2b */
-            PlaySoundEffect((unsigned short)player->sfxTrigger, 0, 0); /* 0x496b3f: EAX=sfxTrigger */
-            player->sfxTrigger = (short)0xFFFF;           /* 0x496b44 */
+        if (player->sfxTrigger != -1 && player->sfxTrigger != (short)0xFFFF) {
+            PlaySoundEffect((unsigned short)player->sfxTrigger, 0, 0);
+            player->sfxTrigger = (short)0xFFFF;
         }
     }
 }

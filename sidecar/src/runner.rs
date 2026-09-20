@@ -221,7 +221,6 @@ pub async fn run_host_session(
     let proxy_ws_out_tx = ws_tunnel_out_tx.clone();
     let mut proxy_ws_in_rx = ws_tunnel_in_tx.subscribe();
     let host_tokens = active_peer_tokens.clone();
-    let default_punch_token = *punch_token.as_bytes();
     let host_proxy_task = tokio::spawn(async move {
         let mut game_buf = [0u8; 2048];
         let mut last_game_addr = proxy_target_game;
@@ -233,25 +232,17 @@ pub async fn run_host_session(
                             if last_game_addr != Some(from) {
                                 last_game_addr = Some(from);
                             }
-                            let targets: Vec<[u8; 16]> = {
-                                let set = host_tokens.lock().unwrap();
-                                if set.is_empty() {
-                                    vec![default_punch_token]
-                                } else {
-                                    set.iter().copied().collect()
-                                }
+                            let tokens: Vec<[u8; 16]> = {
+                                let lock = host_tokens.lock().unwrap();
+                                lock.iter().cloned().collect()
                             };
-                            for token in targets {
-                                let mut framed = Vec::with_capacity(17 + n);
-                                framed.extend_from_slice(&token);
-                                framed.push(crate::loopback::MSG_TYPE_GAME_DATA);
-                                framed.extend_from_slice(&game_buf[..n]);
-                                if let Err(err) = proxy_ws_out_tx.send(framed) {
-                                    tracing::warn!(%err, "Singleton proxy: failed sending game datagram to WS tunnel");
-                                } else {
-                                    tracing::trace!(payload_len = n, "Singleton proxy: tunneled local game datagram via WebSocket");
-                                    log::debug!("Tunneled local game datagram ({} bytes with 17-byte header) via WebSocket", n);
-                                }
+
+                            for token in tokens {
+                                let mut frame = Vec::with_capacity(17 + n);
+                                frame.extend_from_slice(&token);
+                                frame.push(0x01);
+                                frame.extend_from_slice(&game_buf[..n]);
+                                let _ = proxy_ws_out_tx.send(frame);
                             }
                         }
                         Err(err) => {

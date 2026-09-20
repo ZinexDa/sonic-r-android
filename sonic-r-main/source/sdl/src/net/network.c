@@ -1679,6 +1679,11 @@ void ApplyNetworkPlayerState(void)
         if (header == NET_MSG_JOIN_REQ && net_is_host()) {
             printf("[NET_DEBUG] Host: handling JOIN_REQ from slot %d (len=%d)\n", from_slot, len);
             fflush(stdout);
+
+            if (from_slot >= NET_MAX_PLAYERS || g_netPlayerCount >= 4) {
+                printf("[NET_WARN] Host: Lobby is full (count=%d), rejecting slot %d\n", g_netPlayerCount, from_slot);
+                return;
+            }
             /* Host: client requested a slot. from_slot was auto-assigned
              * by net_recv(). Payload carries the client's matchmaker
              * username; we use it to populate the decoration table.
