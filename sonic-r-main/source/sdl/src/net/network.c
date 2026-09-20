@@ -1552,6 +1552,7 @@ void ApplyNetworkPlayerState(void)
 
     /* Process all pending network messages */
     while ((len = net_poll_one(buf, sizeof(buf), &from_slot)) > 0) {
+        if (!net_is_host()) s_lastHostPacketMs = timeGetTime();
         if (len < 4) continue;  /* need at least a header */
 
         unsigned int header = rl32u(buf);
@@ -2151,7 +2152,6 @@ void ApplyNetworkPlayerState(void)
             uint16_t frame = rl16u(buf + 6);
             g_gameDataPacketFrame = frame;
             g_netSessionFrame = (int)frame;
-            s_lastHostPacketMs = timeGetTime();
         }
     }
 
@@ -2159,9 +2159,8 @@ void ApplyNetworkPlayerState(void)
         && g_introCountdown == 0) {
         DWORD now    = timeGetTime();
         DWORD silent = now - s_lastHostPacketMs;
-        if (silent > 45000 && g_netDisconnectFlag == 0) {
-            DebugLog("Host disconnected (silent for %ums) — exiting race\n",
-                     (unsigned)silent);
+        if (silent > 60000 && g_netDisconnectFlag == 0) {
+            DebugLog("Host silent for %ums — exiting\n", (unsigned)silent);
             g_netDisconnectFlag = 1;
             if (g_fadeState != FADE_OUT) {
                 g_fadeState = FADE_OUT;

@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Process
 import android.util.Log
 import android.view.KeyEvent
+import android.view.WindowManager
 import org.libsdl.app.SDLActivity
 
 /**
@@ -83,6 +84,7 @@ class GameActivity : SDLActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         applyNetplaySettings()
         applyAudioSettings()
         applyControlSettings()
