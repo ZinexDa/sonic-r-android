@@ -89,7 +89,7 @@ void EnumNetworkSessions(int flag);
  * and enqueues packets; main thread dequeues in ApplyNetworkPlayerState.
  * ===================================================================== */
 
-#define NET_QUEUE_SIZE 64
+#define NET_QUEUE_SIZE 256
 
 typedef struct {
     char data[NET_MAX_PACKET];
@@ -923,7 +923,7 @@ void SendNetworkHostData(void)
         if (s_hostSlotLastRecvMs[i] == 0) continue;
 
         DWORD silent = now - s_hostSlotLastRecvMs[i];
-        if (silent > 15000) {
+        if (silent > 45000) {
             DebugLog("Player %d disconnected (silent %ums)\n", i, (unsigned)silent);
             g_playerBase[i].netConnected = 0;
             g_playerBase[i].netActive = 0;
@@ -934,21 +934,8 @@ void SendNetworkHostData(void)
         }
     }
 
-    if (g_netDisconnectFlag == 0) {
-        int anyRemote = 0;
-        for (i = 0; i < g_netPlayerCount; i++) {
-            if (i == g_localPlayerIndex) continue;
-            if (g_playerBase[i].netActive) { anyRemote = 1; break; }
-        }
-        if (!anyRemote) {
-            DebugLog("All remote players disconnected — exiting race\n");
-            g_netDisconnectFlag = 1;
-            if (g_fadeState != FADE_OUT) {
-                g_fadeState = FADE_OUT;
-                g_fadeSpeed = 0xC;
-            }
-        }
-    }
+    /* Remote player disconnects do not terminate the host's active race.
+     * Inactive player slots simply stop updating positions. */
 
     g_netSyncEstablished = 1;
 }
@@ -1129,8 +1116,8 @@ void WaitForNetworkData(void)
     int from_slot;
     int gotData = 0;
 
-    /* Timeout: 60s on first frame, 15s thereafter — binary: WaitForSingleObject */
-    DWORD timeout = (g_netSyncEstablished == 0) ? 60000 : 15000;
+    /* Timeout: 60s on first frame, 45s thereafter — binary: WaitForSingleObject */
+    DWORD timeout = (g_netSyncEstablished == 0) ? 60000 : 45000;
     DWORD deadline = timeGetTime() + timeout;
 
     /* Poll for game data broadcast (0xFF0000F0, 16 bytes) from host */
@@ -2036,29 +2023,29 @@ void ApplyNetworkPlayerState(void)
             uint16_t seq = rl16u(buf + 4);
             unsigned short inputBits = rl16u(buf + 6);
             uint8_t playerIdx = *(uint8_t *)(buf + 8);
-            if (playerIdx < MAX_PLAYERS &&
-                g_playerBase[playerIdx].netActive != 0 &&
-                (int16_t)(seq - s_lastRecvInputSeq[playerIdx]) > 0) {
-                s_lastRecvInputSeq[playerIdx] = seq;
-                s_netInputBuffer[playerIdx] = inputBits;
-                g_netPlayerRecvd[playerIdx] = 1;
+            if (playerIdx < MAX_PLAYERS && g_playerBase[playerIdx].netActive != 0) {
                 s_hostSlotLastRecvMs[playerIdx] = timeGetTime();
+                if ((int16_t)(seq - s_lastRecvInputSeq[playerIdx]) > 0) {
+                    s_lastRecvInputSeq[playerIdx] = seq;
+                    s_netInputBuffer[playerIdx] = inputBits;
+                    g_netPlayerRecvd[playerIdx] = 1;
 #if NET_PEER_AUTHORITATIVE
-                if (len > 12) {
-                    Player *cpl = &g_playerBase[playerIdx];
-                    short prevLaps = cpl->lapsCompleted;
-                    int is_kf = (buf[9] & 1);
-                    net_delta_decode(&s_deltaRecv[playerIdx],
-                                     (const unsigned char *)buf + 12,
-                                     len - 12, is_kf, cpl);
-                    if (cpl->lapsCompleted == 3 && prevLaps < 3) {
-                        int counter = g_finishOrderCounter;
-                        cpl->trackProgress = (int)(0xFFFFFFFF - (unsigned int)counter);
-                        g_finishOrderCounter = counter + 1;
+                    if (len > 12) {
+                        Player *cpl = &g_playerBase[playerIdx];
+                        short prevLaps = cpl->lapsCompleted;
+                        int is_kf = (buf[9] & 1);
+                        net_delta_decode(&s_deltaRecv[playerIdx],
+                                         (const unsigned char *)buf + 12,
+                                         len - 12, is_kf, cpl);
+                        if (cpl->lapsCompleted == 3 && prevLaps < 3) {
+                            int counter = g_finishOrderCounter;
+                            cpl->trackProgress = (int)(0xFFFFFFFF - (unsigned int)counter);
+                            g_finishOrderCounter = counter + 1;
+                        }
+                        NetInterpRecord((int)playerIdx);
                     }
-                    NetInterpRecord((int)playerIdx);
-                }
 #endif
+                }
             }
             continue;
         }
@@ -2172,7 +2159,7 @@ void ApplyNetworkPlayerState(void)
         && g_introCountdown == 0) {
         DWORD now    = timeGetTime();
         DWORD silent = now - s_lastHostPacketMs;
-        if (silent > 15000 && g_netDisconnectFlag == 0) {
+        if (silent > 45000 && g_netDisconnectFlag == 0) {
             DebugLog("Host disconnected (silent for %ums) — exiting race\n",
                      (unsigned)silent);
             g_netDisconnectFlag = 1;
