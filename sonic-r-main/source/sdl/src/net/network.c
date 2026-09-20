@@ -402,11 +402,12 @@ static void send_client_join_request(void)
         net_client_connect(hip, NET_PORT_DEFAULT);
     }
 
-    struct {
+    struct __attribute__((packed)) {
         int     hdr;
         char    name[MM_MAX_USERNAME];
         char    platform[16];
         uint8_t region;
+        short   charId;
     } joinReq;
     memset(&joinReq, 0, sizeof(joinReq));
     joinReq.hdr = NET_MSG_JOIN_REQ;
@@ -417,6 +418,7 @@ static void send_client_join_request(void)
     strncpy(joinReq.name, uname, MM_MAX_USERNAME - 1);
     strncpy(joinReq.platform, MM_PLATFORM, sizeof(joinReq.platform) - 1);
     joinReq.region = (uint8_t)platform_get_region();
+    joinReq.charId = (short)g_menuPlayer.charId;
 
     net_send_to_host(&joinReq, sizeof(joinReq));
 
@@ -1647,20 +1649,9 @@ void ApplyNetworkPlayerState(void)
         if (net_is_host() && from_slot >= 1 && from_slot < NET_MAX_PLAYERS
             && from_slot >= g_netPlayerCount
             && header != NET_MSG_JOIN_REQ) {
-            /* struct { int hdr; int slot; } reply;
-             * reply.hdr  = NET_MSG_SLOT_ASSIGN;
-             * reply.slot = from_slot;
-             * net_send_to(from_slot, &reply, sizeof(reply));
-             * g_netPlayerCount = from_slot + 1;
-             * DebugLog("Host: implicit join for slot %d, playerCount=%d\n",
-             *          from_slot, g_netPlayerCount);
-             * { extern int g_netLobbyPlayerSlot;
-             *   g_netLobbyPlayerSlot = from_slot; } */
-            fprintf(stderr,
-                    "FATAL: packet header 0x%08x from unregistered slot %d before NET_MSG_JOIN_REQ. "
-                    "Client must send JOIN_REQ first.\n",
-                    header, from_slot);
-            abort();
+            DebugLog("Warning: ignoring packet 0x%08x from unconfirmed slot %d (playerCount=%d)\n",
+                     header, from_slot, g_netPlayerCount);
+            continue;
         }
 
         /* ---- SDL session protocol: join request / slot assignment ---- */
@@ -1691,6 +1682,14 @@ void ApplyNetworkPlayerState(void)
                     memcpy(joinerPlatform, buf + 4 + MM_MAX_USERNAME, NET_PLATFORM_LEN);
                     joinerPlatform[NET_PLATFORM_LEN - 1] = '\0';
                     joinerRegion = (uint8_t)buf[4 + MM_MAX_USERNAME + NET_PLATFORM_LEN];
+                }
+
+                if (len >= (int)(4 + MM_MAX_USERNAME + NET_PLATFORM_LEN + 1 + sizeof(short))) {
+                    short cid = rl16s(buf + 4 + MM_MAX_USERNAME + NET_PLATFORM_LEN + 1);
+                    if (cid >= 0 && cid < CHAR_COUNT) {
+                        g_playerBase[from_slot].charId = cid;
+                        *(int *)(g_netPlayerDecorations + from_slot * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)cid;
+                    }
                 }
 
                 g_netPlayerCount = from_slot + 1;  /* grow as players join */
@@ -2233,7 +2232,7 @@ void EnumNetworkSessions(int flag)
     wl32(_ccbuf + 0, (uint32_t)NET_MSG_CHAR_CHANGE);
     wl16(_ccbuf + 4, (uint16_t)(short)g_localPlayerIndex);
     wl16(_ccbuf + 6, (uint16_t)g_menuPlayer.charId);
-    UpdateNetworkSync(_ccbuf, 8);
+    SendNetworkPacket(_ccbuf, 8);
 }
 
 /* FUN_00487674 — 58 bytes — called 1x — VALIDATED
