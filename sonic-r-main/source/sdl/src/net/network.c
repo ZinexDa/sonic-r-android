@@ -700,11 +700,15 @@ static void net_apply_snapshot(const char *buf, int len)
 
         {
             short prevLaps = pl->lapsCompleted;
+            short prevColl = (short)pl->collisionCount;
             consumed = net_delta_decode(&s_deltaRecv[playerIdx],
                                         (const unsigned char *)buf + offset,
                                         len - offset, is_keyframe, pl);
             if (consumed == 0) break;
-            if (pl->lapsCompleted == 3 && prevLaps < 3) {
+            int finishedNow = (g_raceSubMode == 3)
+                ? (pl->collisionCount >= 5 && prevColl < 5)
+                : (pl->lapsCompleted == 3 && prevLaps < 3);
+            if (finishedNow) {
                 int counter = g_finishOrderCounter;
                 pl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
                 pl->racePosition  = (short)(counter + 1);
@@ -1454,6 +1458,8 @@ void InitNetworkGame(void)
     if (g_netTrackIndex < 0 || g_netTrackIndex >= 5) {
         g_netTrackIndex = 0;
     }
+    g_raceSubMode = g_netRaceSubModeIndex;
+    g_trackId = g_trackIdTable[g_netTrackIndex];
 
     /* SDL: host tells clients to start the game — includes track/mode and
      * per-player character IDs so the client can populate player
@@ -1944,6 +1950,10 @@ void ApplyNetworkPlayerState(void)
                 g_netRaceSubModeIndex = rl16s(buf + 10);
                 g_netWeatherType      = (int)rl16s(buf + 12);
                 g_netPlayerMode       = (int)rl16s(buf + 14);
+                g_raceSubMode         = g_netRaceSubModeIndex;
+                if (g_netTrackIndex >= 0 && g_netTrackIndex < 5) {
+                    g_trackId = g_trackIdTable[g_netTrackIndex];
+                }
             }
 
             /* Unpack per-player character IDs. Binary propagated these
@@ -2068,11 +2078,15 @@ void ApplyNetworkPlayerState(void)
                     if (len > 12) {
                         Player *cpl = &g_playerBase[playerIdx];
                         short prevLaps = cpl->lapsCompleted;
+                        short prevColl = (short)cpl->collisionCount;
                         int is_kf = (buf[9] & 1);
                         net_delta_decode(&s_deltaRecv[playerIdx],
                                          (const unsigned char *)buf + 12,
                                          len - 12, is_kf, cpl);
-                        if (cpl->lapsCompleted == 3 && prevLaps < 3) {
+                        int finishedNow = (g_raceSubMode == 3)
+                            ? (cpl->collisionCount >= 5 && prevColl < 5)
+                            : (cpl->lapsCompleted == 3 && prevLaps < 3);
+                        if (finishedNow) {
                             int counter = g_finishOrderCounter;
                             cpl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
                             cpl->racePosition  = (short)(counter + 1);
@@ -2181,7 +2195,10 @@ void ApplyNetworkPlayerState(void)
 
     if (g_localPlayerIndex >= 0 && g_localPlayerIndex < NET_MAX_PLAYERS) {
         Player *locPl = &g_playerBase[g_localPlayerIndex];
-        if (locPl->lapsCompleted >= 3 && locPl->trackProgress < 0x60000000) {
+        int locFinished = (g_raceSubMode == 3)
+            ? (locPl->collisionCount >= 5)
+            : (locPl->lapsCompleted >= 3);
+        if (locFinished && locPl->trackProgress < 0x60000000) {
             int counter = g_finishOrderCounter;
             locPl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
             locPl->racePosition  = (short)(counter + 1);

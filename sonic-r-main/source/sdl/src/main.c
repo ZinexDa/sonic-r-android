@@ -1227,7 +1227,7 @@ race_setup:
             g_netTrackIndex = 0;
         }
         g_trackId = g_trackIdTable[g_netTrackIndex];
-        g_raceSubMode = g_netRaceSubModeIndex * 3;
+        g_raceSubMode = (g_netRaceSubModeIndex == 1) ? 3 : g_netRaceSubModeIndex;
         g_timeOfDay = (int)g_netPlayerMode;
         g_weatherType = (int)g_netWeatherType;
         /* Host runs state 1, client state 3 (client takes the

@@ -1205,7 +1205,7 @@ void InitObjectVisibility(void)
     }
 
     /* Collectible and item initialization */
-    if (g_netSessionActive == 0) {
+    if (g_netSessionActive == 0 || g_raceSubMode == SUBMODE_BALLOON || g_raceSubMode == 3) {
         InitCollectibles_SP();
         InitItems_SP();
     }
@@ -1351,7 +1351,10 @@ void InitCollectibles_SP(void)
     }
 
     /* randomly assign balloons to collectible slots */
-    if (g_raceSubMode == SUBMODE_BALLOON) {
+    if (g_raceSubMode == SUBMODE_BALLOON || g_raceSubMode == 3) {
+        if (g_netSessionActive != 0) {
+            Srand(0x1337 + (unsigned int)g_trackId * 101);
+        }
         int needed = g_numPlayers * 4 + 1;
         for (int j = 0; j < needed; j++) {
             int slot = j;

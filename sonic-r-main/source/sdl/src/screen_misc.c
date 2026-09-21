@@ -5204,7 +5204,8 @@ int NetworkScreen(void)
 
     /* Character lobby config bytes — 0x48AAF3-0x48AB37 */
     /* These are 16-bit writes to the lobby descriptor buffer */
-    g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((localModeIdx & 0xFFFF) << 16);
+    int actualSubMode = (localModeIdx == 1) ? 3 : 0;
+    g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((actualSubMode & 0xFFFF) << 16);
     g_netGameInfoDest[2] = (g_weatherType & 0xFFFF) | ((g_timeOfDay & 0xFFFF) << 16);
     net_lobby_set_mode_byte((unsigned char)(g_netSavedButtonByte & 0xFF)); /* [0x68A8CA] */
     g_optMenuMaxItem = 3;                                        /* [0x925298] = 3 */
@@ -5776,7 +5777,8 @@ skip_text_entry:
 
         /* Broadcast track/mode selection periodically */
         if (ns_lobbyState > 1 && g_netGameStarted != 0) {           /* 0x48B647 */
-            g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((localModeIdx & 0xFFFF) << 16);
+            int actualSubMode = (localModeIdx == 1) ? 3 : 0;
+            g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((actualSubMode & 0xFFFF) << 16);
             if ((g_totalFrames & 0x3F) == 0x20) {              /* 0x48B670: every 32 frames */
                 UpdateNetworkSync(g_netGameInfoDest, 0x30);   /* 0x48B687 */
             }
@@ -5795,7 +5797,8 @@ skip_text_entry:
             }
  
             localTrackIdx = (int)(short)(g_netGameInfoDest[1] & 0xFFFF);         /* [1] low word */
-            localModeIdx  = (int)(short)(g_netGameInfoDest[1] >> 16);          /* [1] high word */
+            int netSubMode = (int)(short)(g_netGameInfoDest[1] >> 16);          /* [1] high word */
+            localModeIdx  = (netSubMode == 3) ? 1 : 0;
             g_weatherType = (int)(short)(g_netGameInfoDest[2] & 0xFFFF);       /* [2] low word */
             g_timeOfDay   = (int)(short)(g_netGameInfoDest[2] >> 16);          /* [2] high word */
 
@@ -6192,6 +6195,8 @@ exit_network_screen:
     g_netSavedCharId = (int)(signed short)g_menuPlayer.charId;
     g_netSavedTrackIdx = localTrackIdx;
     g_netSavedModeIdx = localModeIdx;
+    g_trackId = g_trackIdTable[localTrackIdx];
+    g_raceSubMode = (localModeIdx == 1) ? 3 : 0;
     {
         int *dst = (int *)((char *)&g_playerBase[0] + 0x4B0);
         for (int i = 0; i < 16; i++)
@@ -6373,7 +6378,8 @@ int NetworkScreenReentry(void)
     ns_connectionMode = 0;
     g_netProviderChoice = -1;
 
-    g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((localModeIdx & 0xFFFF) << 16);
+    int actualSubMode = (localModeIdx == 1) ? 3 : 0;
+    g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((actualSubMode & 0xFFFF) << 16);
     g_netGameInfoDest[2] = (g_weatherType & 0xFFFF) | ((g_timeOfDay & 0xFFFF) << 16);
     net_lobby_set_mode_byte((unsigned char)(g_netSavedButtonByte & 0xFF));
     g_optMenuMaxItem = 3;
@@ -6698,7 +6704,8 @@ skip_text_entry_re:
         }
 
         if (ns_lobbyState > 1 && g_netGameStarted != 0) {
-            g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((localModeIdx & 0xFFFF) << 16);
+            int actualSubMode = (localModeIdx == 1) ? 3 : 0;
+            g_netGameInfoDest[1] = (localTrackIdx & 0xFFFF) | ((actualSubMode & 0xFFFF) << 16);
             if ((g_totalFrames & 0x3F) == 0x20) {
                 UpdateNetworkSync(g_netGameInfoDest, 0x30);
             }
@@ -6709,7 +6716,8 @@ skip_text_entry_re:
                 g_netGameInfoDest[i] = g_netLobbyConfigBuf[i];
             }
             localTrackIdx = (int)(short)(g_netGameInfoDest[1] & 0xFFFF);         /* [1] low word */
-            localModeIdx  = (int)(short)(g_netGameInfoDest[1] >> 16);            /* [1] high word */
+            int netSubMode = (int)(short)(g_netGameInfoDest[1] >> 16);          /* [1] high word */
+            localModeIdx  = (netSubMode == 3) ? 1 : 0;
             g_weatherType = (int)(short)(g_netGameInfoDest[2] & 0xFFFF);         /* [2] low word */
             g_timeOfDay   = (int)(short)(g_netGameInfoDest[2] >> 16);            /* [2] high word */
             g_netReceivedLobbyData = 0;
@@ -6898,7 +6906,7 @@ exit_network_screen_re:
     g_netSavedTrackIdx = localTrackIdx;
     g_netSavedModeIdx = localModeIdx;
     g_trackId = g_trackIdTable[localTrackIdx];
-    g_raceSubMode = localModeIdx * 3;
+    g_raceSubMode = (localModeIdx == 1) ? 3 : 0;
     {
         int *dst = (int *)((char *)&g_playerBase[0] + 0x4B0);
         for (int i = 0; i < 16; i++) {

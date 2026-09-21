@@ -577,11 +577,11 @@ void CheckRaceCompletion(void)
     }
 
     /* player got 5 balloons?
-     * For each player: if field 0x1F4 == 5 (race type complete), set 0x5E = 3 */
-    if (g_raceSubMode == SUBMODE_BALLOON && g_numViewports > 0) {
+     * For each player: if field 0x1F4 >= 5 (race type complete), set 0x5E = 3 */
+    if ((g_raceSubMode == SUBMODE_BALLOON || g_raceSubMode == 3) && g_numViewports > 0) {
         for (int pi = 0; pi < g_numViewports; pi++) {
             Player *p = &g_playerBase[pi];
-            if (p->collisionCount == 5) {
+            if (p->collisionCount >= 5) {
                 p->lapsCompleted = 3;
             }
         }
