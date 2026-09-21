@@ -81,6 +81,13 @@ void net_sidecar_stop(void)
 extern void platform_pump_events(void);
 void EnumNetworkSessions(int flag);
 
+#define SET_SLOT_CHARACTER(slot, cid) do { \
+    g_playerBase[(slot)].charId = (short)(cid); \
+    *(short *)&g_playerBase[(slot)].selectCharId = (short)(cid); \
+    g_playerBase[(slot)]._unk_0x1E0 = (short)(cid); \
+    *(int *)(g_netPlayerDecorations + (slot) * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)(cid); \
+} while(0)
+
 /* =====================================================================
  * Receive thread — packet ring buffer
  *
@@ -699,7 +706,8 @@ static void net_apply_snapshot(const char *buf, int len)
             if (consumed == 0) break;
             if (pl->lapsCompleted == 3 && prevLaps < 3) {
                 int counter = g_finishOrderCounter;
-                pl->trackProgress = (int)(0xFFFFFFFF - (unsigned int)counter);
+                pl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
+                pl->racePosition  = (short)(counter + 1);
                 g_finishOrderCounter = counter + 1;
             }
         }
@@ -1369,6 +1377,18 @@ void InitNetworkGame(void)
             dst[i] = src[i];
     }
 
+    /* Reset finish order and race positions for all player slots */
+    g_finishOrderCounter = 0;
+    for (i = 0; i < NET_MAX_PLAYERS; i++) {
+        g_playerBase[i].racePosition = (short)(i + 1);
+    }
+
+    /* Sync character IDs into lobby copy and game info */
+    for (i = 0; i < g_netPlayerCount && i < NET_MAX_PLAYERS; i++) {
+        g_netLobbyDataCopy[3 + i] = (int)g_playerBase[i].charId;
+        g_netGameInfoDest[3 + i]  = (int)g_playerBase[i].charId;
+    }
+
     /* Clear active flag for ALL 5 player slots */
     for (i = 0; i < 5; i++) {
         g_playerBase[i].netActive = 0;
@@ -1441,8 +1461,7 @@ void InitNetworkGame(void)
      * session/player data that our SDL port doesn't have).
      * Client skips this — it already received START_GAME to get here. */
     if (net_is_host()) {
-        g_playerBase[g_localPlayerIndex].charId = (short)g_menuPlayer.charId;
-        *(int *)(g_netPlayerDecorations + g_localPlayerIndex * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)g_menuPlayer.charId;
+        SET_SLOT_CHARACTER(g_localPlayerIndex, g_menuPlayer.charId);
 
         /* START_GAME packet layout (16 + NET_MAX_PLAYERS*2 bytes):
          *   +0x00 int   hdr              = NET_MSG_START_GAME
@@ -1692,8 +1711,7 @@ void ApplyNetworkPlayerState(void)
                 if (len >= (int)(4 + MM_MAX_USERNAME + NET_PLATFORM_LEN + 1 + sizeof(short))) {
                     short cid = rl16s(buf + 4 + MM_MAX_USERNAME + NET_PLATFORM_LEN + 1);
                     if (cid >= 0 && cid < CHAR_COUNT) {
-                        g_playerBase[from_slot].charId = cid;
-                        *(int *)(g_netPlayerDecorations + from_slot * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)cid;
+                        SET_SLOT_CHARACTER(from_slot, cid);
                     }
                 }
 
@@ -1715,8 +1733,7 @@ void ApplyNetworkPlayerState(void)
                 }
 
                 /* Ensure host slot 0 has host's menu pick */
-                g_playerBase[0].charId = (short)g_menuPlayer.charId;
-                *(int *)(g_netPlayerDecorations + 0 * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)g_menuPlayer.charId;
+                SET_SLOT_CHARACTER(0, g_menuPlayer.charId);
 
                 /* Build extended SLOT_ASSIGN reply with platform/region and character info.
                  * Wire layout:
@@ -1849,14 +1866,12 @@ void ApplyNetworkPlayerState(void)
                         if (s != slot) {
                             short remoteCid = rl16s(buf + charBlockOff + s * 2);
                             if (remoteCid >= 0 && remoteCid < CHAR_COUNT) {
-                                g_playerBase[s].charId = remoteCid;
-                                *(int *)(g_netPlayerDecorations + s * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)remoteCid;
+                                SET_SLOT_CHARACTER(s, remoteCid);
                             }
                         }
                     }
                 }
-                g_playerBase[slot].charId = (short)g_menuPlayer.charId;
-                *(int *)(g_netPlayerDecorations + slot * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)g_menuPlayer.charId;
+                SET_SLOT_CHARACTER(slot, g_menuPlayer.charId);
 
                 s_haveSlotAssign = 1;
                 EnumNetworkSessions(0);
@@ -1950,10 +1965,10 @@ void ApplyNetworkPlayerState(void)
                                 (int)cid, k);
                         continue;
                     }
-                    g_playerBase[k].charId = cid;
+                    SET_SLOT_CHARACTER(k, cid);
                 }
                 /* Restore local player's own pick */
-                g_playerBase[g_localPlayerIndex].charId = g_menuPlayer.charId;
+                SET_SLOT_CHARACTER(g_localPlayerIndex, g_menuPlayer.charId);
             }
 
             /* Populate decoration table.  Real names should already be in
@@ -2015,8 +2030,7 @@ void ApplyNetworkPlayerState(void)
                 continue;
             }
             if (slot >= 0 && slot < NET_MAX_PLAYERS) {
-                g_playerBase[slot].charId = charId;
-                *(int *)(g_netPlayerDecorations + slot * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)charId;
+                SET_SLOT_CHARACTER(slot, charId);
 
                 if (net_is_host()) {
                     for (int s = 1; s < g_netPlayerCount; s++) {
@@ -2060,7 +2074,8 @@ void ApplyNetworkPlayerState(void)
                                          len - 12, is_kf, cpl);
                         if (cpl->lapsCompleted == 3 && prevLaps < 3) {
                             int counter = g_finishOrderCounter;
-                            cpl->trackProgress = (int)(0xFFFFFFFF - (unsigned int)counter);
+                            cpl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
+                            cpl->racePosition  = (short)(counter + 1);
                             g_finishOrderCounter = counter + 1;
                         }
                         NetInterpRecord((int)playerIdx);
@@ -2110,45 +2125,16 @@ void ApplyNetworkPlayerState(void)
                 net_apply_snapshot(buf, len);
             }
             else if (header == 0xFFF0003Fu && len >= 0x44) {
-                /* Camera sync — 68 bytes — binary 0x4D9BBD
-                 * Per-player camera/race data, plus g_raceFinished update.
-                 * Layout: header(4) + perPlayerPos[4*3](48) + racePos[4](4)
-                 *       + lapsDone[4](4) + collCount[4](4) + raceFinished(2) + pad(2) */
                 int savedRaceFinished = g_raceFinished;
+                int tmp = rl32s(buf + 0x3E);
+                g_raceFinished = tmp >> 16;
 
-                if (g_numViewports > 0) {
-                    for (i = 0; i < g_numViewports; i++) {
-                        Player *pl = &g_playerBase[i];
+                /* DO NOT overwrite pl->lapsCompleted, pl->racePosition, or lap times here! */
 
-                        /* racePosition (byte → word) at pkt+0x34 */
-                        pl->lapsCompleted =
-                            (short)*(unsigned char *)(buf + 0x34 + i);
-                        /* lapsCompleted (byte → word) at pkt+0x38 */
-                        pl->racePosition =
-                            (short)*(unsigned char *)(buf + 0x38 + i);
-                        /* collisionCount (byte → int) at pkt+0x3C */
-                        pl->collisionCount =
-                            (int)*(unsigned char *)(buf + 0x3C + i);
-
-                        /* 3 ints of position data at pkt+0x04, stride 12 per player */
-                        pl->lap1Time = rl32s(buf + 0x04 + i * 12 + 0);
-                        pl->lap2Time = rl32s(buf + 0x04 + i * 12 + 4);
-                        pl->lap3Time = rl32s(buf + 0x04 + i * 12 + 8);
-                    }
+                if (savedRaceFinished == 0 && g_raceFinished != 0) {
+                    g_fadeSpeed = 0x10;
+                    g_fadeState = 2;
                 }
-
-                /* Update g_raceFinished — binary: sar eax, 0x10 on word at pkt+0x40 */
-                {
-                    int tmp = rl32s(buf + 0x3E);
-                    g_raceFinished = tmp >> 16;
-                }
-
-                /* If race wasn't finished before, init end-game fade — binary 0x4D9C73 */
-                if (savedRaceFinished == 0) {
-                    g_fadeSpeed = 0x10;  /* 0x00901C4C */
-                    g_fadeState = 2;     /* 0x00901C48 — FADE_OUT */
-                }
-
             }
             else if (header == 0xFFF0004Fu && len >= 12) {
                 /* Keepalive — binary 0x4D9C98 */
@@ -2190,6 +2176,16 @@ void ApplyNetworkPlayerState(void)
                 s_haveSlotAssign = 0;
                 s_lastJoinReqMs  = 0;
             }
+        }
+    }
+
+    if (g_localPlayerIndex >= 0 && g_localPlayerIndex < NET_MAX_PLAYERS) {
+        Player *locPl = &g_playerBase[g_localPlayerIndex];
+        if (locPl->lapsCompleted >= 3 && locPl->trackProgress < 0x60000000) {
+            int counter = g_finishOrderCounter;
+            locPl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
+            locPl->racePosition  = (short)(counter + 1);
+            g_finishOrderCounter = counter + 1;
         }
     }
 
@@ -2237,8 +2233,7 @@ void EnumNetworkSessions(int flag)
 
     int slot = net_is_host() ? 0 : g_localPlayerIndex;
     if (slot >= 0 && slot < NET_MAX_PLAYERS) {
-        g_playerBase[slot].charId = (short)g_menuPlayer.charId;
-        *(int *)(g_netPlayerDecorations + slot * NET_DECO_STRIDE + NET_DECO_LOBBYCHAR) = (int)g_menuPlayer.charId;
+        SET_SLOT_CHARACTER(slot, g_menuPlayer.charId);
     }
 
     if (!net_is_host() && net_local_slot() < 0) {

@@ -163,6 +163,47 @@ pub async fn fetch_server_list(hub_ws_url: &str) -> Result<Vec<ServerInfo>, Stri
     }
 }
 
+async fn get_or_create_peer_socket(
+    socks_map: &tokio::sync::Mutex<std::collections::HashMap<[u8; 16], Arc<UdpSocket>>>,
+    tok: [u8; 16],
+    bind_port: u16,
+    ws_out: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+) -> Result<Arc<UdpSocket>, std::io::Error> {
+    let mut map = socks_map.lock().await;
+    if let Some(sock) = map.get(&tok) {
+        return Ok(sock.clone());
+    }
+    let sock = Arc::new(UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], bind_port))).await?);
+    let bound_p = sock.local_addr().map(|a| a.port()).unwrap_or(0);
+    tracing::info!(bound_p, "Bound dynamic ephemeral loopback port for peer");
+    let rx_sock = sock.clone();
+    tokio::spawn(async move {
+        let mut buf = [0u8; 2048];
+        loop {
+            match rx_sock.recv_from(&mut buf).await {
+                Ok((n, _from)) => {
+                    let mut frame = Vec::with_capacity(17 + n);
+                    frame.extend_from_slice(&tok);
+                    frame.push(crate::loopback::MSG_TYPE_GAME_DATA);
+                    frame.extend_from_slice(&buf[..n]);
+                    if let Err(err) = ws_out.send(frame) {
+                        tracing::warn!(%err, "Failed sending peer response to WS tunnel");
+                        break;
+                    }
+                }
+                Err(err) => {
+                    if err.raw_os_error() != Some(10054) {
+                        tracing::warn!(%err, "Error reading from peer ephemeral socket");
+                    }
+                    break;
+                }
+            }
+        }
+    });
+    map.insert(tok, sock.clone());
+    Ok(sock)
+}
+
 /// Host mode session: registers a game server, sends heartbeats, and manages incoming peer connections.
 pub async fn run_host_session(
     config: HostConfig,
@@ -185,6 +226,8 @@ pub async fn run_host_session(
         Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
     let active_peer_tokens: Arc<std::sync::Mutex<std::collections::HashSet<[u8; 16]>>> =
         Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    let peer_socks: Arc<tokio::sync::Mutex<std::collections::HashMap<[u8; 16], Arc<UdpSocket>>>> =
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
     let (ws_tunnel_out_tx, mut ws_tunnel_out_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     let (ws_tunnel_in_tx, _) = tokio::sync::broadcast::channel::<Vec<u8>>(128);
 
@@ -221,6 +264,7 @@ pub async fn run_host_session(
     let proxy_ws_out_tx = ws_tunnel_out_tx.clone();
     let mut proxy_ws_in_rx = ws_tunnel_in_tx.subscribe();
     let host_tokens = active_peer_tokens.clone();
+    let host_peer_socks = peer_socks.clone();
     let host_proxy_task = tokio::spawn(async move {
         let mut game_buf = [0u8; 2048];
         let mut last_game_addr = proxy_target_game;
@@ -255,24 +299,34 @@ pub async fn run_host_session(
                 ws_res = proxy_ws_in_rx.recv() => {
                     match ws_res {
                         Ok(pkt) => {
-                            if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_GAME_DATA {
+                            let (tok_opt, payload) = if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_GAME_DATA {
                                 let mut tok = [0u8; 16];
                                 tok.copy_from_slice(&pkt[..16]);
                                 host_tokens.lock().unwrap().insert(tok);
-                            }
-                            let payload: &[u8] = if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_GAME_DATA {
-                                &pkt[17..]
+                                (Some(tok), &pkt[17..])
                             } else if pkt.len() >= 17 && pkt[16] == crate::loopback::MSG_TYPE_KEEPALIVE {
                                 continue;
                             } else {
-                                &pkt[..]
+                                (None, &pkt[..])
                             };
+
                             let dest_game = last_game_addr.unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 5030)));
-                            if let Err(err) = proxy_game_sock.send_to(payload, dest_game).await {
+
+                            if let Some(tok) = tok_opt {
+                                let peer_sock = match get_or_create_peer_socket(&host_peer_socks, tok, 0u16, proxy_ws_out_tx.clone()).await {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        tracing::error!(%e, "Failed binding ephemeral socket for peer; falling back to main proxy sock");
+                                        proxy_game_sock.clone()
+                                    }
+                                };
+                                if let Err(err) = peer_sock.send_to(payload, dest_game).await {
+                                    tracing::warn!(%dest_game, %err, "Singleton proxy: failed delivering WS datagram to game via peer socket");
+                                } else {
+                                    tracing::trace!(%dest_game, payload_len = payload.len(), "Singleton proxy: delivered WS datagram to local game via peer socket");
+                                }
+                            } else if let Err(err) = proxy_game_sock.send_to(payload, dest_game).await {
                                 tracing::warn!(%dest_game, %err, "Singleton proxy: failed delivering WS datagram to game");
-                            } else {
-                                tracing::trace!(%dest_game, payload_len = payload.len(), "Singleton proxy: delivered WS datagram to local game");
-                                log::debug!("Delivered WS tunnel datagram ({} bytes) to local game process at {}", payload.len(), dest_game);
                             }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
@@ -457,13 +511,24 @@ pub async fn run_host_session(
                                 %punch_token,
                                 "Received PeerCandidate! Managing peer connection"
                             );
-                            active_peer_tokens.lock().unwrap().insert(*punch_token.as_bytes());
+                            // On the host, bind dynamic ephemeral ports (port 0) for each peer tunnel
+                            // so the game process receives packets from distinct source addresses,
+                            // allowing it to properly assign Slots 1, 2, and 3 without overwriting.
+                            let bind_port = 0u16;
+
+                            let tok_bytes = *punch_token.as_bytes();
+                            active_peer_tokens.lock().unwrap().insert(tok_bytes);
                             if let Some(ref tx) = event_tx {
                                 let _ = tx.send(RunnerEvent::PeerCandidateReceived { peer_addr, punch_token }).await;
                             }
                             let should_spawn = spawned_tokens.lock().unwrap().insert(punch_token);
                             if should_spawn {
                                 tracing::info!(%punch_token, %peer_addr, "Registering active peer token on host singleton session");
+                                let socks_map = peer_socks.clone();
+                                let ws_out_clone = ws_tunnel_out_tx.clone();
+                                tokio::spawn(async move {
+                                    let _ = get_or_create_peer_socket(&socks_map, tok_bytes, bind_port, ws_out_clone).await;
+                                });
                                 let cmd_tx_clone = ws_cmd_tx.clone();
                                 let sub_event_tx = event_tx.clone();
                                 let active_peers_clone = active_peers.clone();
@@ -486,7 +551,8 @@ pub async fn run_host_session(
                             tracing::info!(%punch_token, %relay_addr, "Received UseRelay from hub");
                             *last_relay.lock().unwrap() = Some(relay_addr);
                             let _ = relay_tx.send(relay_addr);
-                            active_peer_tokens.lock().unwrap().insert(*punch_token.as_bytes());
+                            let tok_bytes = *punch_token.as_bytes();
+                            active_peer_tokens.lock().unwrap().insert(tok_bytes);
 
                             let should_spawn = spawned_tokens.lock().unwrap().insert(punch_token);
                             if should_spawn {
@@ -495,6 +561,12 @@ pub async fn run_host_session(
                                     %relay_addr,
                                     "Registering active peer token from UseRelay on host singleton session"
                                 );
+                                let bind_port = 0u16;
+                                let socks_map = peer_socks.clone();
+                                let ws_out_clone = ws_tunnel_out_tx.clone();
+                                tokio::spawn(async move {
+                                    let _ = get_or_create_peer_socket(&socks_map, tok_bytes, bind_port, ws_out_clone).await;
+                                });
                                 let cmd_tx_clone = ws_cmd_tx.clone();
                                 let sub_event_tx = event_tx.clone();
                                 let active_peers_clone = active_peers.clone();
