@@ -54,6 +54,8 @@ class LauncherActivity : Activity() {
         binding.btnMods.setOnClickListener {
             startActivity(Intent(this, ModsActivity::class.java))
         }
+
+        binding.footerText.text = "v${BuildConfig.VERSION_NAME} • Sonic R Decompilation"
     }
 
     override fun onResume() {
