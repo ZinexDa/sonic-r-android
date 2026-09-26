@@ -547,6 +547,13 @@ void platform_pump_events(void)
     TouchOverlay_Update(s_keystate);
 }
 
+void platform_reset_input(void)
+{
+    TouchOverlay_Reset();
+    memset(s_physicalKeystate, 0, sizeof(s_physicalKeystate));
+    memset(s_keystate, 0, sizeof(s_keystate));
+}
+
 int platform_init_gamepads(void)
 {
     LoadGameControllerMappings();

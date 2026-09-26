@@ -10,6 +10,7 @@
 #include "sonicr_types.h"
 #include "sonicr_globals.h"
 #include "sonicr_functions.h"
+#include "lap_validation.h"
 #include <math.h>
 
 #define IABS(x) ({ int _v = (x); int _s = _v >> 31; (_v ^ _s) - _s; })
@@ -113,6 +114,14 @@ void UpdatePlayerLapSector(Player *player)
     int *bnd = g_trackBoundaryWaypoints;
     if (bnd == NULL) {
         return;
+    }
+
+    int pIdx = -1;
+    if (g_playerBase != NULL) {
+        pIdx = (int)(player - g_playerBase);
+        if (pIdx >= 0 && pIdx < MAX_PLAYERS) {
+            LapValidation_Update(pIdx, player);
+        }
     }
 
     int posX = player->posX;
@@ -225,8 +234,18 @@ void UpdatePlayerLapSector(Player *player)
         goto store_sector;                /* 0x4818C7 */
     }
 
+    /* Checkpoint and minimum lap time validation */
+    if (pIdx >= 0 && pIdx < MAX_PLAYERS) {
+        if (!LapValidation_CheckLocalLap(pIdx, player)) {
+            goto store_sector;
+        }
+    }
+
     /* Lap increment — 0x4818CD */
     player->lapsCompleted++;                                /* 0x4818D0: inc word [eax+0x5E] */
+    if (pIdx >= 0 && pIdx < MAX_PLAYERS) {
+        LapValidation_OnLapCredited(pIdx);
+    }
 
     /* Call lap validation for player 0 or in GP mode — 0x4818D4 */
     if (player == (Player *)g_playerBase || g_raceType == RACE_MULTIPLAYER) { /* 0x4818D4, 0x4818DB */
@@ -258,11 +277,12 @@ void UpdatePlayerLapSector(Player *player)
     
     /* Finished player progress — 0x481971-0x48199B */
     int posVal = player->lapsCompleted;                     /* *(int*)(p+0x5C)>>16 = short at 0x5E = lap count */
-    if (posVal == 3) {                                  /* 0x48197A: finished all laps */
+    if (posVal >= 3 && (unsigned int)player->trackProgress < 0x60000000) { /* 0x48197A: finished all laps */
         int counter = g_finishOrderCounter;             /* 0x481984 */
-        unsigned int progress = 0xFFFFFFFF - (unsigned int)counter; /* 0x48197F, 0x481990 */
+        unsigned int progress = 0x70000000 - (unsigned int)counter; /* 0x48197F, 0x481990 */
         g_finishOrderCounter = counter + 1;             /* 0x48198F, 0x481995 */
         player->trackProgress = (int)progress;          /* 0x48199B: byte 0x4C */
+        player->racePosition  = (short)(counter + 1);
     }
 
 store_sector:

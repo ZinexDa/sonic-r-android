@@ -9,6 +9,7 @@
 #include "sonicr_types.h"
 #include "sonicr_globals.h"
 #include "sonicr_functions.h"
+#include "lap_validation.h"
 
 #define P_INT(p, off) (*(int *)((char *)(p) + (off)))
 
@@ -477,6 +478,8 @@ void InitRaceState(void) {
  * ===================================================================== */
 void ResetAllRaceState(void)
 {
+    LapValidation_ResetAll();
+
     /* Core race flags (0x471ee7-0x471f07) */
     g_isPaused = 0;                             /* 0x901C30 */
     g_unk_901C0C = 0;                           /* 0x901C0C */

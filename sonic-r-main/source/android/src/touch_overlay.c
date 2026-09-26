@@ -869,6 +869,12 @@ void TouchOverlay_Update(unsigned char *keystate)
             continue;
         }
 
+        /* If lobby state is inactive but a touch is still bound to a lobby control,
+         * re-bind it to current in-game controls so controls don't get ignored */
+        if (Engine_GetLobbyState() == 0 && s_touches[i].binding >= TOUCH_BIND_LOBBY_F1 && s_touches[i].binding <= TOUCH_BIND_LOBBY_ESC) {
+            s_touches[i].binding = DetermineTouchBinding(s_touches[i].x * (float)screenW, s_touches[i].y * (float)screenH, &layout);
+        }
+
         float px = s_touches[i].x * (float)screenW;
         float py = s_touches[i].y * (float)screenH;
 

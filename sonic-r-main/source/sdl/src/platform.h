@@ -83,6 +83,10 @@ int platform_init_gamepads(void);
  * Unused slots are zeroed. Returns number of gamepads found. */
 int platform_poll_gamepads(unsigned short *joySlotState, int maxSlots);
 
+/* Resets all platform input state (touch overlay touches, physical keystates).
+ * Call on major screen transitions (e.g. lobby to race entry). */
+void platform_reset_input(void);
+
 /* =====================================================================
  * Timing
  * ===================================================================== */

@@ -258,6 +258,7 @@ void ApplyNetworkPlayerState(void);                     /* 0x004D9568 — recv d
  * Input
  * ===================================================================== */
 void ReadInput(void);                                   /* 0x00477228 */
+int  ReadLocalInput(void);                              /* 0x004774A0 */
 void ResetInputState(void);                             /* 0x0047059C */
 void InitOptionStuff(void);                             /* 0x0047096C */
 void PollAllInputDevices(void);                         /* 0x004769B0 */

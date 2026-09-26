@@ -1330,6 +1330,7 @@ race_setup:
      * before entering the countdown iris. Prevents fast peers from racing
      * while slow peers (DC) are still touching the filesystem. */
     NetLevelSyncBarrier();
+    platform_reset_input();
 
     /* Ensure track visibly fades in from black on race entry */
     g_fadeState = FADE_IN;
@@ -1422,13 +1423,17 @@ race_start:
          * the network-provided values.  Re-apply intro countdown mask
          * since the restored values are unmasked. */
         if (g_netSessionActive != 0 && g_isNetworkGame != 0) {
-            unsigned short savedInput[4];
+            unsigned short savedRemoteInput[4];
             for (int k = 0; k < 4; k++) {
-                savedInput[k] = g_perPlayerInput[k];
+                savedRemoteInput[k] = g_perPlayerInput[k];
             }
             ReadInput();
             for (int k = 0; k < 4; k++) {
-                g_perPlayerInput[k] = savedInput[k];
+                if (k == g_localPlayerIndex) {
+                    g_perPlayerInput[k] = (unsigned short)ReadLocalInput();
+                } else {
+                    g_perPlayerInput[k] = savedRemoteInput[k];
+                }
             }
             if (g_introCountdown > 0) {
                 for (int k = 0; k < 4; k++) {

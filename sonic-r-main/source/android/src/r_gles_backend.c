@@ -73,6 +73,7 @@ int g_glBackingWidth = 640;
 int g_glBackingHeight = 480;
 int g_glViewportOffsetX = 0;
 int g_glViewportOffsetY = 0;
+static int s_currentViewportIndex = -1;
 
 /* Vertex format for GLES2 (28 bytes) */
 typedef struct {
@@ -626,6 +627,17 @@ void R_FlushState(void)
     {
         glScissor(s_desired.scissorX, s_desired.scissorY,
                   s_desired.scissorW, s_desired.scissorH);
+        if (g_numHumans > 1) {
+            static int s_lastAppliedFrame = -1;
+            static int s_lastAppliedVp = -1;
+            if (g_totalFrames - s_lastAppliedFrame >= 60 || s_currentViewportIndex != s_lastAppliedVp) {
+                s_lastAppliedFrame = g_totalFrames;
+                s_lastAppliedVp = s_currentViewportIndex;
+                GLES_LOGI("[SPLIT_VIEWPORT] Player %d glScissor applied: x=%d y=%d w=%d h=%d",
+                          s_currentViewportIndex, s_desired.scissorX, s_desired.scissorY,
+                          s_desired.scissorW, s_desired.scissorH);
+            }
+        }
         s_current.scissorX = s_desired.scissorX;
         s_current.scissorY = s_desired.scissorY;
         s_current.scissorW = s_desired.scissorW;
@@ -709,10 +721,20 @@ void R_SetAlphaRef(float ref)
 void R_SetScissor(int x, int y, int w, int h)
 {
     s_desired.scissorEnabled = 1;
-    s_desired.scissorX = g_glViewportOffsetX + (x * g_glBackingWidth) / (g_screenWidth > 0 ? g_screenWidth : 640);
-    s_desired.scissorY = g_glViewportOffsetY + ((g_screenHeight - y - h) * g_glBackingHeight) / (g_screenHeight > 0 ? g_screenHeight : 480);
-    s_desired.scissorW = (w * g_glBackingWidth) / (g_screenWidth > 0 ? g_screenWidth : 640);
-    s_desired.scissorH = (h * g_glBackingHeight) / (g_screenHeight > 0 ? g_screenHeight : 480);
+    s_desired.scissorX = x;
+    s_desired.scissorY = y;
+    s_desired.scissorW = w;
+    s_desired.scissorH = h;
+    if (g_numHumans > 1) {
+        static int s_lastScissorLogFrame = -1;
+        static int s_lastScissorVp = -1;
+        if (g_totalFrames - s_lastScissorLogFrame >= 60 || s_currentViewportIndex != s_lastScissorVp) {
+            s_lastScissorLogFrame = g_totalFrames;
+            s_lastScissorVp = s_currentViewportIndex;
+            GLES_LOGI("[SPLIT_VIEWPORT] Player %d R_SetScissor: x=%d y=%d w=%d h=%d",
+                      s_currentViewportIndex, x, y, w, h);
+        }
+    }
 }
 
 void R_DisableScissor(void)
@@ -994,6 +1016,14 @@ void BeginFrame(void)
 
     /* Set 4:3 active viewport */
     glViewport(offsetX, offsetY, vpW, vpH);
+    if (g_numHumans > 1) {
+        static int s_lastVpLogFrame = -1;
+        if (g_totalFrames - s_lastVpLogFrame >= 60 || s_lastVpLogFrame < 0) {
+            s_lastVpLogFrame = g_totalFrames;
+            GLES_LOGI("[SPLIT_VIEWPORT] glViewport: x=%d y=%d w=%d h=%d (numHumans=%d)",
+                      offsetX, offsetY, vpW, vpH, g_numHumans);
+        }
+    }
 
     R_ResetState();
 }
@@ -1351,6 +1381,11 @@ void SetViewportFromConfig(int *config)
     if (config == NULL) {
         return;
     }
+    if (config >= g_viewportArray && config < g_viewportArray + 126) {
+        s_currentViewportIndex = (int)((config - g_viewportArray) / 21);
+    } else {
+        s_currentViewportIndex = -1;
+    }
     g_clipLeft = config[0];
     g_clipLeftDouble = g_clipLeft * 2;
     g_clipTop = config[1];
@@ -1369,8 +1404,6 @@ void SetViewportFromConfig(int *config)
     g_vpClipRight16 = config[0xe];
     g_vpParam0F = config[0xf];
     g_vpParam10 = config[0x10];
-    g_dispCenterX = (g_clipLeft + g_clipRight) / 2;
-    g_dispCenterY = (g_clipTop + g_clipBottom) / 2;
 }
 
 void ProcessTpageStates(void)
@@ -1462,10 +1495,9 @@ void FinalizeMenuTexturesD3D(void)
 
 void RenderBackground(void)
 {
-    int sw = g_screenWidth > 0 ? g_screenWidth : 640;
-    int sh = g_screenHeight > 0 ? g_screenHeight : 480;
     s_statColorClears++;
-    R_SetScissor(0, 0, sw, sh);
+    R_SetScissor(g_glViewportOffsetX, g_glViewportOffsetY,
+                 g_glBackingWidth, g_glBackingHeight);
     R_FlushState();
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);

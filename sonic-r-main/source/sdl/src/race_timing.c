@@ -526,12 +526,10 @@ void UpdateLapCounter(int isGameActive)
             _DAT_0068975c = g_totalFrames2;
         }
         else if (g_introCountdown == 3 && g_netReadyFlag == 0) {
-            if (g_totalFrames2 - _DAT_0068975c > 600) {
-                g_netReadyFlag = 1;
-            }
-            if (g_netReadyFlag != 0) {
-                g_introCountdown = 2;
-            }
+            /* NetLevelSyncBarrier guarantees all peers are ready before race loop starts.
+             * Unconditionally advance to prevent 600-frame stall if a legacy keepalive packet was dropped. */
+            g_netReadyFlag = 1;
+            g_introCountdown = 2;
         }
         else if (g_introCountdown < 1) {
             if (g_introTimer != 0) {

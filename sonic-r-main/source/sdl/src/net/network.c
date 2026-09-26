@@ -12,6 +12,7 @@
 #include "matchmaker.h"
 #include "net_interp.h"
 #include "net_delta.h"
+#include "lap_validation.h"
 #ifdef SONICR_DC
 #include <kos/thread.h>
 #include <kos/mutex.h>
@@ -705,10 +706,16 @@ static void net_apply_snapshot(const char *buf, int len)
                                         (const unsigned char *)buf + offset,
                                         len - offset, is_keyframe, pl);
             if (consumed == 0) break;
+            LapValidation_Update(playerIdx, pl);
+            if (pl->lapsCompleted > prevLaps) {
+                if (!LapValidation_CheckRemoteLap(playerIdx, pl, prevLaps)) {
+                    pl->lapsCompleted = prevLaps;
+                }
+            }
             int finishedNow = (g_raceSubMode == 3)
                 ? (pl->collisionCount >= 5 && prevColl < 5)
                 : (pl->lapsCompleted == 3 && prevLaps < 3);
-            if (finishedNow) {
+            if (finishedNow && (unsigned int)pl->trackProgress < 0x60000000) {
                 int counter = g_finishOrderCounter;
                 pl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
                 pl->racePosition  = (short)(counter + 1);
@@ -970,7 +977,7 @@ void UpdateNetworkClient(void)
         s_netInputBuffer[g_localPlayerIndex] = localInput;
         g_perPlayerInput[g_localPlayerIndex] = localInput;
 
-        if (g_introCountdown < 3) {
+        if (g_introCountdown >= 0) {
 #if NET_PEER_AUTHORITATIVE
             /* Peer-auth: send delta-compressed state every frame */
             s_netSendCounter++;
@@ -2083,10 +2090,16 @@ void ApplyNetworkPlayerState(void)
                         net_delta_decode(&s_deltaRecv[playerIdx],
                                          (const unsigned char *)buf + 12,
                                          len - 12, is_kf, cpl);
+                        LapValidation_Update((int)playerIdx, cpl);
+                        if (cpl->lapsCompleted > prevLaps) {
+                            if (!LapValidation_CheckRemoteLap((int)playerIdx, cpl, prevLaps)) {
+                                cpl->lapsCompleted = prevLaps;
+                            }
+                        }
                         int finishedNow = (g_raceSubMode == 3)
                             ? (cpl->collisionCount >= 5 && prevColl < 5)
                             : (cpl->lapsCompleted == 3 && prevLaps < 3);
-                        if (finishedNow) {
+                        if (finishedNow && (unsigned int)cpl->trackProgress < 0x60000000) {
                             int counter = g_finishOrderCounter;
                             cpl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
                             cpl->racePosition  = (short)(counter + 1);
@@ -2198,7 +2211,7 @@ void ApplyNetworkPlayerState(void)
         int locFinished = (g_raceSubMode == 3)
             ? (locPl->collisionCount >= 5)
             : (locPl->lapsCompleted >= 3);
-        if (locFinished && locPl->trackProgress < 0x60000000) {
+        if (locFinished && (unsigned int)locPl->trackProgress < 0x60000000) {
             int counter = g_finishOrderCounter;
             locPl->trackProgress = (int)(0x70000000 - (unsigned int)counter);
             locPl->racePosition  = (short)(counter + 1);

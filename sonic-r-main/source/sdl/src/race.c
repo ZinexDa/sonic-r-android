@@ -41,9 +41,10 @@ void ComputeRacePositions(int playerIdx)
     int playerSlot = g_raceOrder[playerIdx];
     Player *player = &players[playerSlot];
 
-    /* Skip if player has finished (completed 3 laps) */
-    if (player->lapsCompleted == 3) {
-        return;
+    /* Skip waypoint progress calculation if player has finished (completed 3 laps or 5 balloons in balloon mode).
+     * Proceed directly to sorting pass so finished positions remain sorted and accurate. */
+    if (player->lapsCompleted >= 3 || (g_raceSubMode == SUBMODE_BALLOON && player->collisionCount >= 5)) {
+        goto check_sort;
     }
 
     /* Compute track progress */
@@ -108,6 +109,7 @@ void ComputeRacePositions(int playerIdx)
     }
     player->trackProgress = (int)progress;
 
+check_sort:
     /* Sort players by progress (only player 0 does the sort) */
     if (g_raceOrder[playerIdx] != 0) {
         return;

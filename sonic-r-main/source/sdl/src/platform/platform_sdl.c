@@ -712,6 +712,11 @@ void platform_pump_events(void)
     }
 }
 
+void platform_reset_input(void)
+{
+    memset(s_keystate, 0, sizeof(s_keystate));
+}
+
 /* =====================================================================
  * Gamepad polling
  *

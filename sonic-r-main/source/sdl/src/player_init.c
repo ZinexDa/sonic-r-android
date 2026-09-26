@@ -15,6 +15,7 @@
 #include "sonicr_types.h"
 #include "sonicr_globals.h"
 #include "sonicr_functions.h"
+#include "lap_validation.h"
 
 /* Forward declarations for functions defined later in this file */
 void InitAIConfig(void);
@@ -609,6 +610,9 @@ void InitPlayerSlot(Player *player, int charId)
         int animSlot = (int)(player - g_playerBase);
         if (animSlot >= 0 && animSlot < 10) {
             g_animDataPtrs[animSlot] = NULL;
+        }
+        if (animSlot >= 0 && animSlot < MAX_PLAYERS) {
+            LapValidation_ResetPlayer(animSlot);
         }
     }
     player->loopMode = 0;
