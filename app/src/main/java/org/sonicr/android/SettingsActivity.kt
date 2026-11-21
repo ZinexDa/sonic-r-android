@@ -18,6 +18,10 @@ class SettingsActivity : Activity() {
         const val DEFAULT_SFX_VOLUME = 1.0f
 
         const val KEY_CONTROLS_CUSTOM = "controls_custom"
+        const val KEY_TOUCH_CONTROLS_ENABLED = "touch_controls_enabled"
+        const val KEY_TOUCH_CONTROLS_OPACITY = "touch_controls_opacity"
+        const val DEFAULT_TOUCH_CONTROLS_ENABLED = true
+        const val DEFAULT_TOUCH_CONTROLS_OPACITY = 100
         // 7 independent control keys
         const val KEY_CTRL_DPAD_X = "ctrl_dpad_x"
         const val KEY_CTRL_DPAD_Y = "ctrl_dpad_y"
@@ -114,6 +118,8 @@ class SettingsActivity : Activity() {
         binding.btnResetControls.setOnClickListener {
             prefs.edit()
                 .putBoolean(KEY_CONTROLS_CUSTOM, false)
+                .putBoolean(KEY_TOUCH_CONTROLS_ENABLED, DEFAULT_TOUCH_CONTROLS_ENABLED)
+                .putInt(KEY_TOUCH_CONTROLS_OPACITY, DEFAULT_TOUCH_CONTROLS_OPACITY)
                 // Remove 7 per-control keys
                 .remove(KEY_CTRL_DPAD_X)
                 .remove(KEY_CTRL_DPAD_Y)

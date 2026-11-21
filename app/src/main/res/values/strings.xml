@@ -33,10 +33,13 @@
     <string name="label_selected_start">Selected: Start / Pause</string>
     <string name="toast_controls_reset">Touch controls reset to default</string>
     <string name="toast_controls_saved">Touch control layout saved</string>
+    <string name="label_show_touch_controls">Show Touch Controls</string>
+    <string name="label_opacity_format">Opacity: %1$d%%</string>
+    <string name="label_controls_hidden">TOUCH CONTROLS HIDDEN</string>
     <string name="desc_settings_coming_soon">Graphics, audio, and touch control layout options will be available here.</string>
     <string name="desc_multiplayer_coming_soon">Cross-platform peer-to-peer multiplayer via signaling hub and Rust transport sidecar is in development.</string>
     <string name="desc_mods_coming_soon">Coming Soon! Mod support and a dedicated mod manager are planned for a future update.</string>
-    <string name="version_info">v1.3.1 • Sonic R Decompilation</string>
+    <string name="version_info">v1.3.2 • Sonic R Decompilation</string>
 
     <string name="asset_status_ready">● Game Data Ready</string>
     <string name="asset_status_missing">▲ Game Data Missing — Tap to Install</string>

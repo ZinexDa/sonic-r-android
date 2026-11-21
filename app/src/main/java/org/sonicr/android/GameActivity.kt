@@ -37,6 +37,9 @@ class GameActivity : SDLActivity() {
         )
 
         @JvmStatic
+        external fun nativeSetTouchOverlayConfig(enabled: Boolean, opacity: Float)
+
+        @JvmStatic
         external fun nativeSetNetplayMode(
             isNetplay: Boolean,
             isHost: Boolean,
@@ -178,6 +181,18 @@ class GameActivity : SDLActivity() {
     private fun applyControlSettings() {
         try {
             val prefs = getSharedPreferences(SettingsActivity.PREFS_NAME, Context.MODE_PRIVATE)
+            val touchEnabled = prefs.getBoolean(
+                SettingsActivity.KEY_TOUCH_CONTROLS_ENABLED,
+                SettingsActivity.DEFAULT_TOUCH_CONTROLS_ENABLED
+            )
+            val touchOpacityPercent = prefs.getInt(
+                SettingsActivity.KEY_TOUCH_CONTROLS_OPACITY,
+                SettingsActivity.DEFAULT_TOUCH_CONTROLS_OPACITY
+            ).coerceIn(0, 100)
+            val touchOpacity = touchOpacityPercent / 100f
+            Log.i(TAG, "Applying touch overlay config: enabled=$touchEnabled, opacity=$touchOpacityPercent% ($touchOpacity)")
+            nativeSetTouchOverlayConfig(touchEnabled, touchOpacity)
+
             val custom = prefs.getBoolean(SettingsActivity.KEY_CONTROLS_CUSTOM, false) &&
                 prefs.contains(SettingsActivity.KEY_CTRL_DPAD_X)
             if (custom) {

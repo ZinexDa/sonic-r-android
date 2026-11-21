@@ -796,6 +796,15 @@ Java_org_sonicr_android_GameActivity_nativeSetControlLayout(
     }
 }
 
+JNIEXPORT void JNICALL
+Java_org_sonicr_android_GameActivity_nativeSetTouchOverlayConfig(
+    JNIEnv *env, jclass clazz, jboolean enabled, jfloat opacity)
+{
+    (void)env;
+    (void)clazz;
+    TouchOverlay_SetConfig(enabled ? 1 : 0, (float)opacity);
+}
+
 /* =====================================================================
  * Menu / Lobby Controller Buttons (F-key synthesis)
  * ===================================================================== */

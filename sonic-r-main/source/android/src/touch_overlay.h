@@ -30,6 +30,7 @@ void TouchOverlay_SetCustomLayout(int enabled,
                                   float lookX, float lookY, float lookScale,
                                   float startX, float startY, float startScale);
 void TouchOverlay_ResetCustomLayout(void);
+void TouchOverlay_SetConfig(int enabled, float opacity);
 
 #ifdef __cplusplus
 }

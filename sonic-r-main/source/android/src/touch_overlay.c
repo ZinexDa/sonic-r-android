@@ -124,6 +124,8 @@ typedef struct {
 } CustomControlLayout;
 
 static CustomControlLayout s_customLayout = {0};
+static int s_overlayEnabled = 1;
+static float s_overlayOpacity = 1.0f;
 
 static float ClampScale(float s) {
     if (s < 0.70f) return 0.70f;
@@ -187,6 +189,21 @@ void TouchOverlay_ResetCustomLayout(void)
 {
     memset(&s_customLayout, 0, sizeof(s_customLayout));
     SDL_Log("TouchOverlay: Custom layout reset to default automatic layout");
+}
+
+void TouchOverlay_SetConfig(int enabled, float opacity)
+{
+    int prevEnabled = s_overlayEnabled;
+    s_overlayEnabled = enabled ? 1 : 0;
+    if (opacity < 0.0f) opacity = 0.0f;
+    if (opacity > 1.0f) opacity = 1.0f;
+    s_overlayOpacity = opacity;
+
+    if (prevEnabled && !s_overlayEnabled) {
+        TouchOverlay_Reset();
+    }
+    SDL_Log("TouchOverlay: Config applied (enabled=%d, opacity=%.2f)",
+            s_overlayEnabled, s_overlayOpacity);
 }
 
 static void ComputeLayout(int screenW, int screenH, TouchLayout *out)
@@ -671,6 +688,10 @@ void TouchOverlay_TestMultiTouch(void)
 
 void TouchOverlay_HandleEvent(const SDL_Event *event)
 {
+    if (!s_overlayEnabled && !s_inUnitTest) {
+        return;
+    }
+
     switch (event->type) {
         case SDL_FINGERDOWN: {
             SDL_FingerID fid = event->tfinger.fingerId;
@@ -819,6 +840,16 @@ void TouchOverlay_HandleEvent(const SDL_Event *event)
 
 void TouchOverlay_Update(unsigned char *keystate)
 {
+    if (!s_overlayEnabled && !s_inUnitTest) {
+        memset(s_touchKeystate, 0, sizeof(s_touchKeystate));
+        memset(&s_pressed, 0, sizeof(s_pressed));
+        s_joystickActive = 0;
+        if (keystate) {
+            memcpy(keystate, s_physicalKeystate, 256);
+        }
+        return;
+    }
+
     int screenW = 0, screenH = 0;
     platform_get_drawable_size(&screenW, &screenH);
     if (screenW <= 0 || screenH <= 0) {
@@ -1293,7 +1324,7 @@ static void PushVertex(float x, float y, float r, float g, float b, float a)
         s_vertices[s_numVertices].r = r;
         s_vertices[s_numVertices].g = g;
         s_vertices[s_numVertices].b = b;
-        s_vertices[s_numVertices].a = a;
+        s_vertices[s_numVertices].a = a * s_overlayOpacity;
         s_numVertices++;
     }
 }
@@ -1469,7 +1500,7 @@ static void DrawTexturedButton(GLuint texId, float cx, float cy, float radius, i
      * - Full opacity when pressed (1.0f vs 0.85f unpressed)
      * - Brightness modulation boost when pressed */
     float r = isPressed ? (radius * 0.92f) : radius;
-    float alpha = isPressed ? 1.0f : 0.85f;
+    float alpha = (isPressed ? 1.0f : 0.85f) * s_overlayOpacity;
     float tint = isPressed ? 1.20f : 1.0f;
 
     OverlayTexVertex verts[6];
@@ -1667,6 +1698,7 @@ static void DrawPillButton(float cx, float cy, float w, float h, const char *tex
 
 void TouchOverlay_Render(int screenWidth, int screenHeight)
 {
+    if (!s_overlayEnabled || s_overlayOpacity <= 0.001f) return;
     if (screenWidth <= 0 || screenHeight <= 0) return;
     if (!InitGLPipeline()) return;
 

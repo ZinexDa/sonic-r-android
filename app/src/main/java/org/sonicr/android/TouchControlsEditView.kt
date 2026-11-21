@@ -65,6 +65,12 @@ class TouchControlsEditView @JvmOverloads constructor(
     var selectedControl: SelectedControl = SelectedControl.NONE
         private set
 
+    var controlsVisible: Boolean = true
+        private set
+
+    var controlsOpacity: Float = 1.0f
+        private set
+
     var onSelectionChanged: ((SelectedControl, Float) -> Unit)? = null
     var onLayoutChanged: (() -> Unit)? = null
 
@@ -124,6 +130,31 @@ class TouchControlsEditView @JvmOverloads constructor(
         color = Color.parseColor("#8040C4FF")
         textSize = 28f
         letterSpacing = 0.1f
+    }
+    private val hiddenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#99E0F2FE")
+        textSize = 36f
+        textAlign = Paint.Align.CENTER
+        letterSpacing = 0.12f
+        isFakeBoldText = true
+    }
+
+    fun setControlsVisible(visible: Boolean) {
+        controlsVisible = visible
+        if (!visible) {
+            isDragging = false
+            activePointerId = MotionEvent.INVALID_POINTER_ID
+            if (selectedControl != SelectedControl.NONE) {
+                selectedControl = SelectedControl.NONE
+                onSelectionChanged?.invoke(selectedControl, 1.0f)
+            }
+        }
+        invalidate()
+    }
+
+    fun setControlsOpacity(opacity: Float) {
+        controlsOpacity = opacity.coerceIn(0.0f, 1.0f)
+        invalidate()
     }
 
     private val tempPath = Path()
@@ -382,6 +413,9 @@ class TouchControlsEditView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!controlsVisible) {
+            return super.onTouchEvent(event)
+        }
         val w = width.toFloat().takeIf { it > 0 } ?: return false
         val h = height.toFloat().takeIf { it > 0 } ?: return false
 
@@ -555,6 +589,23 @@ class TouchControlsEditView @JvmOverloads constructor(
             canvas.drawText("4:3 GAME VIEWPORT", margin + 16f, h - 24f, textPaint)
         }
 
+        if (!controlsVisible) {
+            canvas.drawText(
+                context.getString(R.string.label_controls_hidden),
+                w * 0.5f,
+                h * 0.52f,
+                hiddenPaint
+            )
+            return
+        }
+
+        val alphaInt = (controlsOpacity.coerceIn(0.0f, 1.0f) * 255.0f).toInt()
+        if (alphaInt <= 0) {
+            return
+        }
+
+        val saveCount = canvas.saveLayerAlpha(0f, 0f, w, h, alphaInt)
+
         // 2. Render D-Pad
         renderDpad(canvas, w, h)
 
@@ -575,6 +626,8 @@ class TouchControlsEditView @JvmOverloads constructor(
 
         // 8. Render Start Button
         renderStartButton(canvas, w, h)
+
+        canvas.restoreToCount(saveCount)
     }
 
     private fun renderDpad(canvas: Canvas, w: Float, h: Float) {

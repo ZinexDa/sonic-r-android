@@ -62,6 +62,34 @@ class CustomizeControlsActivity : Activity() {
             stX, stY, stS
         )
 
+        val touchEnabled = prefs.getBoolean(
+            SettingsActivity.KEY_TOUCH_CONTROLS_ENABLED,
+            SettingsActivity.DEFAULT_TOUCH_CONTROLS_ENABLED
+        )
+        val touchOpacity = prefs.getInt(
+            SettingsActivity.KEY_TOUCH_CONTROLS_OPACITY,
+            SettingsActivity.DEFAULT_TOUCH_CONTROLS_OPACITY
+        ).coerceIn(0, 100)
+
+        binding.cbShowTouchControls.isChecked = touchEnabled
+        binding.touchControlsEditView.setControlsVisible(touchEnabled)
+        updateOpacityDisplay(touchOpacity)
+
+        binding.cbShowTouchControls.setOnCheckedChangeListener { _, isChecked ->
+            binding.touchControlsEditView.setControlsVisible(isChecked)
+        }
+
+        binding.seekOpacity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    updateOpacityDisplay(progress)
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         updateSelectionUI(
             binding.touchControlsEditView.selectedControl,
             binding.touchControlsEditView.getSelectedScale()
@@ -102,6 +130,9 @@ class CustomizeControlsActivity : Activity() {
 
         binding.btnReset.setOnClickListener {
             binding.touchControlsEditView.resetToDefault()
+            binding.cbShowTouchControls.isChecked = SettingsActivity.DEFAULT_TOUCH_CONTROLS_ENABLED
+            binding.touchControlsEditView.setControlsVisible(SettingsActivity.DEFAULT_TOUCH_CONTROLS_ENABLED)
+            updateOpacityDisplay(SettingsActivity.DEFAULT_TOUCH_CONTROLS_OPACITY)
             Toast.makeText(this, R.string.toast_controls_reset, Toast.LENGTH_SHORT).show()
         }
 
@@ -109,6 +140,8 @@ class CustomizeControlsActivity : Activity() {
             val edit = binding.touchControlsEditView
             prefs.edit()
                 .putBoolean(SettingsActivity.KEY_CONTROLS_CUSTOM, true)
+                .putBoolean(SettingsActivity.KEY_TOUCH_CONTROLS_ENABLED, binding.cbShowTouchControls.isChecked)
+                .putInt(SettingsActivity.KEY_TOUCH_CONTROLS_OPACITY, binding.seekOpacity.progress.coerceIn(0, 100))
                 .putFloat(SettingsActivity.KEY_CTRL_DPAD_X, edit.dpadX)
                 .putFloat(SettingsActivity.KEY_CTRL_DPAD_Y, edit.dpadY)
                 .putFloat(SettingsActivity.KEY_CTRL_DPAD_SCALE, edit.dpadScale)
@@ -130,11 +163,20 @@ class CustomizeControlsActivity : Activity() {
                 .putFloat(SettingsActivity.KEY_CTRL_START_X, edit.startX)
                 .putFloat(SettingsActivity.KEY_CTRL_START_Y, edit.startY)
                 .putFloat(SettingsActivity.KEY_CTRL_START_SCALE, edit.startScale)
-                .apply()
+                .commit()
 
             Toast.makeText(this, R.string.toast_controls_saved, Toast.LENGTH_SHORT).show()
             finish()
         }
+    }
+
+    private fun updateOpacityDisplay(percent: Int) {
+        val clamped = percent.coerceIn(0, 100)
+        if (binding.seekOpacity.progress != clamped) {
+            binding.seekOpacity.progress = clamped
+        }
+        binding.textOpacityLabel.text = getString(R.string.label_opacity_format, clamped)
+        binding.touchControlsEditView.setControlsOpacity(clamped / 100f)
     }
 
     private fun updateSelectionUI(control: TouchControlsEditView.SelectedControl, scale: Float) {
